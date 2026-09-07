@@ -239,7 +239,7 @@ table.vt-tbl tr:hover td { background:rgba(56,189,248,0.05); }
 table.vt-tbl td.r { text-align:right; font-family:"JetBrains Mono",Consolas,monospace; }
 table.vt-tbl td.c { text-align:center; }
 
-/* Sidebar nav radio → menu rows */
+/* Sidebar nav radio menu rows */
 [data-testid="stSidebar"] div[role="radiogroup"] label {
   width: 100%;
   padding: 7px 10px;
@@ -261,6 +261,34 @@ table.vt-tbl td.c { text-align:center; }
 
 /* Dataframes */
 [data-testid="stDataFrame"] { border-radius:10px; overflow:hidden; }
+
+/* Buttons: dark, readable text inside light/filled buttons */
+[data-testid="stButton"] button[kind="primary"],
+[data-testid="stFormSubmitButton"] button[kind="primary"],
+button[kind="primary"][data-testid="baseButton-primary"],
+[data-testid="stDownloadButton"] button[kind="primary"] {
+  color:#0B1220 !important; font-weight:700;
+}
+[data-testid="stButton"] button[kind="primary"]:hover,
+[data-testid="stFormSubmitButton"] button[kind="primary"]:hover {
+  color:#0B1220 !important;
+}
+
+/* Segmented control: selected chip is light with dark readable text */
+[data-testid="stSegmentedControl"] [aria-checked="true"],
+[data-testid="stSegmentedControl"] [data-checked="true"] {
+  background-color:#E2E8F0 !important;
+  color:#0B1220 !important;
+  box-shadow: inset 0 0 0 1px rgba(11,18,32,0.4);
+}
+[data-testid="stSegmentedControl"] [aria-checked="true"] *,
+[data-testid="stSegmentedControl"] [data-checked="true"] * {
+  color:#0B1220 !important;
+}
+[data-testid="stSegmentedControl"] [aria-checked="false"],
+[data-testid="stSegmentedControl"] [data-checked="false"] {
+  color:#E5E7EB !important;
+}
 
 /* Dividers, captions, info */
 hr { border-color: rgba(148,163,184,0.12); }
@@ -446,7 +474,7 @@ def render_sidebar() -> str:
                 default=PROJECT_TYPES[0],
                 key="vtx_project_type",
                 selection_mode="single",
-                help="Tap a button to choose the case type — no dropdown arrow needed.",
+                help="Tap a button to choose the case type.",
             )
             st.caption(PROJECT_TYPE_DESCRIPTIONS[ptype])
             _sidebar_input_form(ptype)
@@ -655,7 +683,7 @@ def build_dcf_val_chart(results: dict[str, Any], metrics: dict[str, Any]) -> go.
             totals={"marker": {"color": "#38BDF8"}},
         )
     )
-    return plotly_dark(fig, "Value creation bridge (DCF value vs investment → NPV)", 360)
+    return plotly_dark(fig, "Value creation bridge (DCF value vs investment, net of NPV)", 360)
 
 
 # ---------------------------------------------------------------------------
@@ -1231,7 +1259,7 @@ def _tp_ratemap_ready(config: tp.ComparisonConfig) -> list[str]:
             has_vu = vu is None or (config.ratemap.get(vu) is not None and config.ratemap.get(vu).rate == config.ratemap.get(vu).rate)
             ok = has_via and has_vu
         if not ok:
-            missing.append(f"{ccy} → {config.comparison_currency}")
+            missing.append(f"{ccy} to {config.comparison_currency}")
     return list(dict.fromkeys(missing))
 
 
@@ -1575,7 +1603,7 @@ def _report_preview_html(state: dict[str, Any]) -> str:
 
   <div class="vt-report-sec">6. Sensitivity (top drivers)</div>
   <div class="vt-tbl-wrap">
-    <table class="vt-tbl"><thead><tr><th>#</th><th>Driver → Impact</th></tr></thead>
+    <table class="vt-tbl"><thead><tr><th>#</th><th>Driver and its impact</th></tr></thead>
     <tbody>{sens_rows}</tbody></table>
   </div>
 
@@ -1763,7 +1791,7 @@ password = "app-password-or-token"
 from_addr = "VALTEXA <sender@yourdomain.com>"
 ```
 
-For Gmail, use an App Password. On Streamlit Cloud use **Settings → Secrets** with the same
+For Gmail, use an App Password. On Streamlit Cloud use **Settings, Secrets** with the same
 `[smtp]` keys, or the `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_FROM`
 environment variables. Restart the app once configured.
 """

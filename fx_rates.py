@@ -359,12 +359,29 @@ def build_board_frame(
     import pandas as pd
 
     rows = []
-    for p in [f"{a}/{b}" for a, b in PAIRS]:
-        r = resolve_effective_rate(p, session_live, db_path)
+    for ccy in CURRENCIES:
+        if ccy == "USD":
+            rows.append(
+                {
+                    "Currency": "USD",
+                    "Name": "US Dollar",
+                    "1 USD =": 1.0,
+                    "1 unit = USD": 1.0,
+                    "Source": "base",
+                    "Date & Time": "-",
+                    "Status": "BASE",
+                }
+            )
+            continue
+        r = resolve_effective_rate(f"USD/{ccy}", session_live, db_path)
+        name = "ZiG (ZWG)" if ccy == "ZWG" else "South African Rand"
+        rate = r.rate if r.rate == r.rate else None
         rows.append(
             {
-                "Currency Pair": p,
-                "Live Rate": None if r.rate != r.rate else r.rate,
+                "Currency": "ZiG (ZWG)" if ccy == "ZWG" else ccy,
+                "Name": name,
+                "1 USD =": rate,
+                "1 unit = USD": None if rate is None else 1.0 / rate,
                 "Source": r.source,
                 "Date & Time": r.ts,
                 "Status": r.status,
