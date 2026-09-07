@@ -262,6 +262,46 @@ table.vt-tbl td.c { text-align:center; }
 /* Dataframes */
 [data-testid="stDataFrame"] { border-radius:10px; overflow:hidden; }
 
+/* Anti-white enforcement: every surface stays the dark navy theme */
+.stApp,
+[data-testid="stAppViewContainer"],
+[data-testid="stSidebar"],
+[data-testid="stHeader"] { background-color:#0B1220 !important; }
+[data-testid="stSidebar"] { background-color:#0A1020 !important; }
+[data-testid="main"] .block-container { max-width:1400px; padding-top:1.2rem; }
+
+/* Inputs: dark boxes, no white fields */
+[data-testid="stTextInput"] input,
+[data-testid="stNumberInput"] input,
+[data-testid="stTextArea"] textarea,
+[data-testid="stDateInput"] input,
+[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
+[data-testid="stMultiselect"] div[data-baseweb="select"] > div {
+  background-color:#0E1626 !important;
+  color:#E5E7EB !important;
+  border-color:rgba(148,163,184,0.25) !important;
+}
+[data-testid="stTextInput"] input::placeholder,
+[data-testid="stTextArea"] textarea::placeholder { color:#5A6E8C !important; }
+
+/* Dropdown popups and option lists: dark, never white */
+[data-baseweb="popover"],
+div[data-testid="stPopover"],
+[data-baseweb="popover"] div[role="listbox"],
+[data-baseweb="popover"] [role="option"],
+div[role="listbox"] { background-color:#131C2E !important; color:#E5E7EB !important; }
+[data-baseweb="popover"] [role="option"]:hover,
+div[role="listbox"] [role="option"]:hover { background-color:#1E2A45 !important; }
+
+/* Hide the arrow-down chevrons (select / multiselect) */
+[data-testid="stSelectbox"] [data-testid="stIconMaterial"],
+[data-testid="stMultiselect"] [data-testid="stIconMaterial"],
+div[data-baseweb="select"] [data-testid="stIconMaterial"] { display:none !important; }
+
+/* Hide the up/down stepper arrows on number inputs */
+[data-testid="stNumberInput"] button { display:none !important; }
+[data-testid="stNumberInput"] input { text-align:right; }
+
 /* Buttons: dark, readable text inside light/filled buttons */
 [data-testid="stButton"] button[kind="primary"],
 [data-testid="stFormSubmitButton"] button[kind="primary"],
