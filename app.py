@@ -293,14 +293,36 @@ div[role="listbox"] { background-color:#131C2E !important; color:#E5E7EB !import
 [data-baseweb="popover"] [role="option"]:hover,
 div[role="listbox"] [role="option"]:hover { background-color:#1E2A45 !important; }
 
-/* Hide the arrow-down chevrons (select / multiselect) */
+/* Hide the down-arrow chevrons everywhere (select / multiselect / baseweb) */
 [data-testid="stSelectbox"] [data-testid="stIconMaterial"],
 [data-testid="stMultiselect"] [data-testid="stIconMaterial"],
-div[data-baseweb="select"] [data-testid="stIconMaterial"] { display:none !important; }
+div[data-baseweb="select"] [data-testid="stIconMaterial"],
+div[data-baseweb="select"] svg { display:none !important; }
 
 /* Hide the up/down stepper arrows on number inputs */
-[data-testid="stNumberInput"] button { display:none !important; }
+[data-testid="stNumberInput"] button,
+[data-testid="stNumberInput"] svg { display:none !important; }
 [data-testid="stNumberInput"] input { text-align:right; }
+
+/* File upload (Upload Case Data): dark theme, no arrows */
+[data-testid="stFileUploaderDropzone"] {
+  background-color:#0E1626 !important;
+  border:1px dashed rgba(56,189,248,0.4) !important;
+  color:#E5E7EB !important;
+}
+[data-testid="stFileUploaderDropzone"] svg { display:none !important; }
+[data-testid="stFileUploaderDropzone"] button,
+[data-testid="stFileUploaderDropzone"] [data-testid="stFileUploaderBrowseFile" i],
+section[data-testid="stFileUploader"] button {
+  background-color:#1E2A45 !important;
+  color:#E5E7EB !important;
+}
+[data-testid="stFileUploaderDropzone"] [data-testid="stFileUploaderFile"] { border-color:rgba(148,163,184,0.25); }
+
+/* Expanders: hide the arrow chevrons in the title rows, keep the boxes clean */
+[data-testid="stExpander"] summary svg,
+[data-testid="stExpander"] [data-testid="stExpanderIcon"],
+[data-testid="stExpander"] [data-testid="stExpander"] summary > button svg { display:none !important; }
 
 /* Buttons: dark, readable text inside light/filled buttons */
 [data-testid="stButton"] button[kind="primary"],
@@ -314,16 +336,16 @@ button[kind="primary"][data-testid="baseButton-primary"],
   color:#0B1220 !important;
 }
 
-/* Segmented control: selected chip is light with dark readable text */
+/* Segmented control (Project Type): full dark theme */
 [data-testid="stSegmentedControl"] [aria-checked="true"],
 [data-testid="stSegmentedControl"] [data-checked="true"] {
-  background-color:#E2E8F0 !important;
-  color:#0B1220 !important;
-  box-shadow: inset 0 0 0 1px rgba(11,18,32,0.4);
+  background: rgba(56,189,248,0.16) !important;
+  color:#7DD3FC !important;
+  border:1px solid rgba(56,189,248,0.4) !important;
 }
 [data-testid="stSegmentedControl"] [aria-checked="true"] *,
 [data-testid="stSegmentedControl"] [data-checked="true"] * {
-  color:#0B1220 !important;
+  color:#7DD3FC !important;
 }
 [data-testid="stSegmentedControl"] [aria-checked="false"],
 [data-testid="stSegmentedControl"] [data-checked="false"] {
@@ -1072,9 +1094,14 @@ def render_fx_multicurrency():
     )
     with st.expander("Manual rate overrides", expanded=False):
         pairs = [f"{a}/{b}" for a, b in fx.PAIRS]
-        o1, o2 = st.columns([2, 2])
-        pair = o1.selectbox("Pair", pairs, key="fx_ov_pair")
-        rate = o2.number_input(
+        pair = st.radio(
+            "Pair",
+            pairs,
+            horizontal=True,
+            key="fx_ov_pair",
+            label_visibility="collapsed",
+        )
+        rate = st.number_input(
             f"Manual rate for {pair}", min_value=0.0000001,
             value=float(st.session_state.get("fx_ov_val", 1.0)),
             step=0.01, format="%.6f", key="fx_ov_rate",
