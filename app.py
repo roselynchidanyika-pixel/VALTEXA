@@ -10,6 +10,7 @@ Run:  streamlit run app.py
 
 from __future__ import annotations
 
+import html
 import io
 import os
 import time
@@ -188,6 +189,20 @@ p, li { color: #D3DCEA; }
   display:inline-block; border:1px solid rgba(56,189,248,0.35);
   background: rgba(56,189,248,0.08); color:#BDE5FF;
   border-radius:999px; padding:2px 10px; font-size:0.72rem; margin-right:6px;
+}
+
+/* Email preview panel */
+.vt-email {
+  background: rgba(11,18,32,0.7); border:1px solid rgba(148,163,184,0.25);
+  border-radius:12px; padding:14px 16px; margin:6px 0 2px;
+}
+.vt-email-row { display:flex; gap:10px; padding:2px 0; font-size:0.86rem; color:#E5E7EB; }
+.vt-email-key { flex:0 0 110px; color:#8CA3C3; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; font-size:0.72rem; padding-top:3px; }
+.vt-email-body {
+  margin-top:10px; padding:10px 12px; border-radius:8px;
+  background: rgba(2,6,15,0.55); border:1px solid rgba(148,163,184,0.18);
+  color:#DBE4F0; font-family:"JetBrains Mono",Consolas,monospace; font-size:0.8rem;
+  white-space:pre-wrap; word-break:break-word; line-height:1.5;
 }
 
 /* Sidebar nav radio → menu rows */
@@ -1424,7 +1439,9 @@ def render_reports():
         st.error(
             "Sender is NOT configured. Add an [smtp] section to .streamlit/secrets.toml "
             "(or set SMTP_HOST / SMTP_PORT / SMTP_USERNAME / SMTP_PASSWORD / SMTP_FROM in "
-            "environment variables or Streamlit Cloud secrets) and restart the app."
+            "environment variables or Streamlit Cloud secrets) and restart the app. "
+            "You can still compose and preview the full email below — it will be sent the "
+            "moment the sender is configured."
         )
 
     c1, c2 = st.columns([2, 1])
@@ -1438,19 +1455,45 @@ def render_reports():
         ),
         height=180,
     )
+    attachments = [
+        ("valtexa_investment_report.pdf", pdf),
+        ("valtexa_investment_analysis.xlsx", excel),
+    ]
+
+    with st.expander("Email preview — complete contents of the message", expanded=False):
+        st.markdown(
+            f"""
+<div class="vt-email">
+  <div class="vt-email-row"><span class="vt-email-key">To</span>{html.escape(to_email) or "<em>not set</em>"}</div>
+  <div class="vt-email-row"><span class="vt-email-key">Subject</span>{html.escape(subject)}</div>
+  <div class="vt-email-row"><span class="vt-email-key">Attachments</span>{html.escape(", ".join(n for n, _ in attachments))}</div>
+  <pre class="vt-email-body">{html.escape(message)}</pre>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "This is exactly what SEND REPORT delivers to the recipient. Nothing below (To, "
+            "Subject, Message) requires a sender — the sender is only needed at delivery time."
+        )
 
     if st.button("SEND REPORT", type="primary"):
         ok, msg = email_service.validate_recipient(to_email)
         if not ok:
             st.error(msg)
+        elif not status["configured"]:
+            st.error(
+                "Not sent — the sender is not configured. Add an [smtp] section to "
+                ".streamlit/secrets.toml (or set SMTP_HOST / SMTP_PORT / SMTP_USERNAME / "
+                "SMTP_PASSWORD / SMTP_FROM in environment variables or Streamlit Cloud "
+                "secrets) and restart the app. The complete message contents are shown in "
+                "the 'Email preview' expander above and will be delivered unchanged."
+            )
         else:
             with st.spinner("Sending..."):
                 ok, msg = email_service.send_email(
                     to_email=to_email, subject=subject, body_text=message,
-                    attachments=[
-                        ("valtexa_investment_report.pdf", pdf),
-                        ("valtexa_investment_analysis.xlsx", excel),
-                    ],
+                    attachments=attachments,
                 )
             if ok:
                 st.success(msg)
