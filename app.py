@@ -205,6 +205,40 @@ p, li { color: #D3DCEA; }
   white-space:pre-wrap; word-break:break-word; line-height:1.5;
 }
 
+/* Inline generated report document */
+.vt-report {
+  background: rgba(11,18,32,0.75); border:1px solid rgba(56,189,248,0.28);
+  border-radius:14px; padding:20px 22px; margin:8px 0 4px;
+}
+.vt-report-head { border-bottom:1px solid rgba(148,163,184,0.25); padding-bottom:12px; margin-bottom:6px; }
+.vt-report-head .vr-brand { font-size:1.15rem; font-weight:800; letter-spacing:0.08em; color:#38BDF8; }
+.vt-report-head .vr-brand em { color:#34D399; font-style:normal; }
+.vt-report-head .vr-title { font-size:1.5rem; font-weight:700; color:#F1F5F9; margin-top:6px; }
+.vt-report-head .vr-meta { color:#8CA3C3; font-size:0.78rem; margin-top:4px; }
+.vt-report-sec {
+  color:#7DD3FC; font-weight:700; letter-spacing:0.05em; text-transform:uppercase;
+  font-size:0.78rem; margin:18px 0 8px; padding-bottom:4px; border-bottom:1px solid rgba(56,189,248,0.2);
+}
+.vt-badge {
+  display:inline-block; border-radius:999px; padding:1px 10px; font-size:0.68rem;
+  font-weight:700; letter-spacing:0.06em;
+}
+.vt-badge.accept { background:rgba(52,211,153,0.14); color:#34D399; border:1px solid rgba(52,211,153,0.4); }
+.vt-badge.reject { background:rgba(248,113,113,0.14); color:#F87171; border:1px solid rgba(248,113,113,0.45); }
+.vt-badge.review { background:rgba(251,191,36,0.14); color:#FBBF24; border:1px solid rgba(251,191,36,0.4); }
+.vt-report-note { color:#D3DCEA; font-size:0.86rem; line-height:1.6; margin-top:8px; }
+.vt-report-foot { color:#8CA3C3; font-size:0.75rem; margin-top:18px; border-top:1px solid rgba(148,163,184,0.2); padding-top:10px; }
+.vt-tbl-wrap { overflow-x:auto; margin:6px 0 4px; }
+table.vt-tbl { width:100%; border-collapse:collapse; font-size:0.78rem; color:#E2E8F0; }
+table.vt-tbl th {
+  background:rgba(56,189,248,0.1); color:#7DD3FC; text-align:left;
+  padding:6px 10px; border-bottom:1px solid rgba(56,189,248,0.3); font-weight:600;
+}
+table.vt-tbl td { padding:5px 10px; border-bottom:1px solid rgba(148,163,184,0.12); color:#D3DCEA; }
+table.vt-tbl tr:hover td { background:rgba(56,189,248,0.05); }
+table.vt-tbl td.r { text-align:right; font-family:"JetBrains Mono",Consolas,monospace; }
+table.vt-tbl td.c { text-align:center; }
+
 /* Sidebar nav radio → menu rows */
 [data-testid="stSidebar"] div[role="radiogroup"] label {
   width: 100%;
@@ -406,11 +440,13 @@ def render_sidebar() -> str:
                 st.rerun()
 
         with st.expander("Investment Inputs", expanded=True):
-            ptype = st.selectbox(
+            ptype = st.segmented_control(
                 "Project Type",
                 PROJECT_TYPES,
+                default=PROJECT_TYPES[0],
                 key="vtx_project_type",
-                format_func=lambda p: p,
+                selection_mode="single",
+                help="Tap a button to choose the case type — no dropdown arrow needed.",
             )
             st.caption(PROJECT_TYPE_DESCRIPTIONS[ptype])
             _sidebar_input_form(ptype)
@@ -898,30 +934,50 @@ def _refresh_fx(fetch: bool = False) -> None:
     st.session_state.setdefault("fx_ratemap", {})
     st.session_state.setdefault("fx_last_fetch", 0.0)
     if fetch:
-        with st.spinner("Fetching live exchange rates..."):
-            live = fx.fetch_live_rates()
-        if live:
-            fx.store_live_rates(live)
-            st.session_state["fx_ratemap"] = live
-            st.session_state["fx_last_fetch"] = time.time()
-            st.success(f"Rates updated from {next(iter(live.values())).source}.")
-        else:
-            st.session_state["fx_ratemap"] = fx.all_effective_rates(_fx_live())
-            st.warning(
-                "Live rates unavailable (provider or network). Showing stored/override rates — "
-                "stale values are labelled, never silently used."
-            )
+        _run_live_fetch()
     elif not st.session_state["fx_ratemap"]:
         st.session_state["fx_ratemap"] = fx.all_effective_rates()
+
+
+def _run_live_fetch() -> None:
+    """Fetch live market rates from the exchange-rate providers and persist them."""
+    with st.spinner("Fetching live exchange rates..."):
+        live = fx.fetch_live_rates()
+    if live:
+        fx.store_live_rates(live)
+        st.session_state["fx_ratemap"] = live
+        st.session_state["fx_last_fetch"] = time.time()
+        st.success(f"Rates updated from {next(iter(live.values())).source}.")
+    else:
+        st.session_state["fx_ratemap"] = fx.all_effective_rates(_fx_live())
+        st.warning(
+            "Live rates unavailable (provider or network). Showing stored/override rates — "
+            "stale values are labelled, never silently used."
+        )
+
+
+def _maybe_auto_fetch_fx() -> None:
+    """Fetch live rates on open once per session (unless the user disabled it)."""
+    if not bool(st.session_state.get("fx_auto", True)):
+        return
+    if st.session_state.get("fx_auto_done"):
+        return
+    st.session_state["fx_auto_done"] = True
+    st.session_state["fx_requested"] = "refresh"
 
 
 def render_fx_multicurrency():
     section_header(
         "FX & Multi-Currency",
-        "USD / ZAR / ZiG across all six pairs. Manual overrides win; live rates refresh on demand.",
+        "USD / ZAR / ZiG across all six pairs. Live market rates are fetched automatically when "
+        "the app opens; manual overrides always win and stored rates are labelled.",
     )
-    _refresh_fx(fetch="refresh" in st.session_state.get("fx_requested", ""))
-    st.session_state.pop("fx_requested", None)
+    st.checkbox(
+        "Fetch live market rates on open",
+        value=bool(st.session_state.get("fx_auto", True)),
+        key="fx_auto",
+    )
+    _refresh_fx()
 
     c1, c2 = st.columns([2, 1])
     interval = c1.select_slider(
@@ -1406,6 +1462,138 @@ def _excel_bytes(results: dict[str, Any], scenarios: dict[str, Any], sens_df: pd
     return buf.getvalue()
 
 
+def _tbl_html(df: pd.DataFrame) -> str:
+    """Render a DataFrame as a formatted HTML table for the report preview."""
+    def cell(v):
+        if pd.isna(v):
+            return ""
+        if isinstance(v, (int, float)):
+            try:
+                f = float(v)
+            except (TypeError, ValueError):
+                return str(v)
+            return f"{f:,.0f}" if abs(f) >= 1 or f == 0 else f"{f:,.2f}"
+        return str(v)
+
+    rows = [[cell(v) for v in row] for row in df.values]
+    frame = pd.DataFrame(rows, columns=[str(c) for c in df.columns])
+    return frame.to_html(index=False, border=0, classes="vt-tbl", escape=True)
+
+
+def _report_preview_html(state: dict[str, Any]) -> str:
+    """The full generated report as live HTML — exactly the document that the PDF/Word/Excel
+    downloads and the email attachment are built from."""
+    from datetime import date
+
+    results = state["results"]
+    inputs = results["inputs"]
+    metrics = results["metrics"]
+    decisions = results["decisions"]
+    final = state["final"]
+    risk_results = state["risk_results"]
+    scenarios = state["scenarios"]
+    sens_df = state.get("sens_df", pd.DataFrame())
+    today = date.today().strftime("%d %b %Y")
+
+    badge = lambda s: f'<span class="vt-badge {status_tone(s)}">{s}</span>' if s else ""
+
+    def money(v):
+        return fmt_money(v) if v is not None and np.isfinite(v) else "N/A"
+
+    def pct(v):
+        return fmt_pct(v) if v is not None and np.isfinite(v) else "N/A"
+
+    metric_rows = "".join(
+        f"<tr><td>{label}</td><td class='r'>{value}</td><td>{badge(stat)}</td></tr>"
+        for label, value, stat in [
+            ("Initial investment", money(inputs.initial_investment), ""),
+            ("Net present value", money(metrics["npv"]), decisions["npv"]["status"]),
+            ("Internal rate of return", pct(metrics["irr"]), decisions["irr"]["status"]),
+            ("Modified IRR", pct(metrics["mirr"]), decisions["mirr"]["status"]),
+            ("Return on investment", pct(metrics["roi"]), decisions["roi"]["status"]),
+            ("Profitability index", fmt_num(metrics["pi"], 3), decisions["pi"]["status"]),
+            ("Payback (years)", fmt_num(metrics["payback"]), decisions["payback"]["status"]),
+        ]
+    )
+
+    scenario_rows = "".join(
+        f"<tr><td>{s['label']}</td><td class='r'>{money(sm['npv'])}</td>"
+        f"<td class='r'>{pct(sm['irr'])}</td><td class='r'>{pct(sm['roi'])}</td>"
+        f"<td>{badge(sm['decision'])}</td><td>{sm['explanation']}</td></tr>"
+        for key, s in scenarios.items()
+        for sm in [s["summary"]]
+    )
+
+    risk_rows = "".join(
+        f"<tr><td>{r.risk}</td><td class='c'>{r.severity}</td><td>{r.explanation}</td>"
+        f"<td>{r.mitigation}</td></tr>"
+        for r in risk_results["risks"]
+    )
+
+    sens_rows = ""
+    if not sens_df.empty:
+        sf = sens_df.head(10)
+        for idx, row in sf.iterrows():
+            parts = " | ".join(f"{c}: {v}" for c, v in row.items() if pd.notna(v))
+            sens_rows += f'<tr><td class="c">{int(idx) + 1}</td><td>{parts}</td></tr>'
+
+    cash_block = f"<div class='vt-tbl-wrap'>{_tbl_html(results['cash_flow_table'])}</div>"
+    dcf_block = f"<div class='vt-tbl-wrap'>{_tbl_html(results['dcf_table'])}</div>"
+
+    return f"""
+<div class="vt-report">
+  <div class="vt-report-head">
+    <div class="vr-brand">VALTEXA<em>.</em></div>
+    <div class="vr-title">Investment Case Report</div>
+    <div class="vr-meta">{today} &middot; generated live from the case · {final["decision"]}</div>
+  </div>
+
+  <div class="vt-report-sec">1. Executive Decision</div>
+  <div class="vt-decision {status_tone(final['decision'])}">
+    <div class="d-verdict">{final["decision"]}</div>
+    <div class="d-reason">{final["reason"]}</div>
+  </div>
+  <div class="vt-report-note"><b>Recommendation.</b> {final["recommendation"]}</div>
+
+  <div class="vt-report-sec">2. Key Metrics & Verification</div>
+  <div class="vt-tbl-wrap">
+    <table class="vt-tbl"><thead><tr><th>Metric</th><th>Value</th><th>Verdict</th></tr></thead>
+    <tbody>{metric_rows}</tbody></table>
+  </div>
+
+  <div class="vt-report-sec">3. Capital Budgeting — Cash-Flow Schedule</div>
+  {cash_block}
+
+  <div class="vt-report-sec">4. DCF & Valuation — Present Value by Year</div>
+  {dcf_block}
+
+  <div class="vt-report-sec">5. Scenario Analysis</div>
+  <div class="vt-tbl-wrap">
+    <table class="vt-tbl"><thead><tr><th>Scenario</th><th>NPV</th><th>IRR</th><th>ROI</th><th>Decision</th><th>Rationale</th></tr></thead>
+    <tbody>{scenario_rows}</tbody></table>
+  </div>
+
+  <div class="vt-report-sec">6. Sensitivity (top drivers)</div>
+  <div class="vt-tbl-wrap">
+    <table class="vt-tbl"><thead><tr><th>#</th><th>Driver → Impact</th></tr></thead>
+    <tbody>{sens_rows}</tbody></table>
+  </div>
+
+  <div class="vt-report-sec">7. Risk Register</div>
+  <div class="vt-tbl-wrap">
+    <table class="vt-tbl"><thead><tr><th>Risk</th><th>Severity</th><th>Explanation</th><th>Mitigation</th></tr></thead>
+    <tbody>{risk_rows}</tbody></table>
+  </div>
+  <div class="vt-report-note"><b>Overall risk:</b> {risk_results["overall_risk"]}. {risk_results["overall_explanation"]}</div>
+
+  <div class="vt-report-sec">8. Conclusion</div>
+  <div class="vt-report-note">{final["recommendation"]}</div>
+  <div class="vt-report-foot">Prepared by VALTEXA — every figure above is computed live from the case
+  assumptions. Download the PDF / Word / Excel below for a print-ready version of this document.</div>
+</div>
+"""
+
+
 def render_reports():
     section_header(
         "Reports & Distribution",
@@ -1417,6 +1605,13 @@ def render_reports():
     if results is None:
         empty_state("No case loaded", "Run an analysis from the sidebar first.")
         return
+
+    st.markdown("#### Report document — full content preview")
+    st.markdown(_report_preview_html(state), unsafe_allow_html=True)
+    st.caption(
+        "This is the complete generated report, rendered live from the case. The PDF, Word and "
+        "Excel downloads below contain exactly the same content."
+    )
 
     pdf, word, excel = _report_bytes(state)
     c1, c2, c3 = st.columns(3)
@@ -1582,6 +1777,10 @@ environment variables. Restart the app once configured.
 def main():
     inject_theme()
     section = render_sidebar()
+    _maybe_auto_fetch_fx()
+    if "refresh" in st.session_state.get("fx_requested", ""):
+        _run_live_fetch()
+        st.session_state.pop("fx_requested", None)
     if section == "Executive Dashboard":
         render_executive_dashboard()
     elif section == "Investment Cases":
