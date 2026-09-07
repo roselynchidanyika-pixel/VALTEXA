@@ -512,11 +512,12 @@ def render_sidebar() -> str:
                 "Project Type",
                 PROJECT_TYPES,
                 default=PROJECT_TYPES[0],
-                key="vtx_project_type",
+                key="vtx_ptype_buttons",
                 selection_mode="single",
                 help="Tap a button to choose the case type.",
             )
-            st.caption(PROJECT_TYPE_DESCRIPTIONS[ptype])
+            ptype = ptype if ptype in PROJECT_TYPES else PROJECT_TYPES[0]
+            st.caption(PROJECT_TYPE_DESCRIPTIONS.get(ptype, PROJECT_TYPE_DESCRIPTIONS[PROJECT_TYPES[0]]))
             _sidebar_input_form(ptype)
 
         with st.expander("Upload Case Data (CSV / Excel)", expanded=False):
