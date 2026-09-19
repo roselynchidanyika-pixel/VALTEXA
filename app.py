@@ -1,1908 +1,1448 @@
-﻿"""VALTEXA — Institutional Financial Decision Platform.
-
-A premium, decision-first capital-investment platform with a dark navy
-institutional theme. All calculations are computed live by the underlying
-engines in this package (calculations, risk, scenario, fx, three-project,
-reporting). No result is hard-coded.
-
-Run:  streamlit run app.py
 """
-
+CAPEXX AI AGENT — Streamlit Application
+========================================
+Royal-blue and white login · Cinematic intro · Market simulation ticker
+· Full capital-project analysis dashboard · Portfolio comparison
+· Exchange-rate board · ASK CAPEXX AI research · Report / Email / Audio
+· 10-second decision status light · Robotic AI voice panel
+"""
 from __future__ import annotations
 
-import html
-import io
-import os
-import time
-from typing import Any
+import base64, copy, io, math, os, time
+from datetime import datetime, timezone
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
-from plotly.subplots import make_subplots
 
-import data_validation as dv
-import email_service
-import fx_rates as fx
-import report_generator as rg
-import three_project as tp
-from calculations import (
-    ProjectInputs,
-    decision_for_irr,
-    decision_for_mirr,
-    decision_for_npv,
-    decision_for_payback,
-    decision_for_pi,
-    decision_for_roi,
-    run_analysis,
+# ── local modules ────────────────────────────────────────────────────────────
+from capexx_engine import (
+    ProjectInput, AnalysisBundle, fmt_ccy, fmt_pct,
+    CURRENCY_DETAILS, SUPPORTED_CURRENCIES, COUNTRY_LIST, PROJECT_TYPES,
+    EXPECTED_COLUMNS, NUMERIC_COLUMNS, parse_upload,
+    demo_project, demo_csv_bytes, try_fetch_live_rates,
+    build_exchange_rate_board, market_snapshot, model_to_text,
+    MARKET_DISCLAIMER, DEMO_DISCLAIMER, run_analysis,
+    funding_priority, knapsack_select, sample_portfolio_projects,
+    vision_pillar,
 )
-from risk_analysis import assess_risks
-from scenario_analysis import (
-    build_scenarios,
-    run_sensitivity,
-    sensitivity_interpretation,
+from capexx_ai import (
+    build_narration_text, section_map, synthesize, tts_available, read_aloud,
+    generate_ai_interpretation, why_did_capexx_text,
+    ROBOT_WELCOME, ROBOT_DEMO_NOTICE, ROBOT_MARKET, data_status_tag,
 )
+from capexx_ask import research, EXAMPLE_QUESTIONS, SEARCH_MODES, live_fx_board
+from capexx_auth import verify, register, SEED_ADMINS
 
+# ── paths ────────────────────────────────────────────────────────────────────
+ROOT       = Path(__file__).resolve().parent
+ASSETS     = ROOT / "assets"
+OUTPUT_RPT = ROOT / "outputs" / "reports"
+OUTPUT_AU  = ROOT / "outputs" / "audio"
+OUTPUT_RPT.mkdir(parents=True, exist_ok=True)
+OUTPUT_AU.mkdir(parents=True, exist_ok=True)
+
+# ── page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="VALTEXA | Institutional Financial Decision Platform",
-    page_icon="",
+    page_title="CAPEXX AI AGENT",
     layout="wide",
+    page_icon=str(ASSETS / "robot.png") if (ASSETS / "robot.png").exists() else "🏛️",
     initial_sidebar_state="expanded",
 )
 
-# ---------------------------------------------------------------------------
-# Constants & theme
-# ---------------------------------------------------------------------------
-
-NAV_SECTIONS = [
-    "Executive Dashboard",
-    "Investment Cases",
-    "Capital Budgeting",
-    "DCF & Valuation",
-    "Returns",
-    "Risk Analysis",
-    "FX & Multi-Currency",
-    "Scenario Analysis",
-    "Sensitivity Analysis",
-    "Project Comparison",
-    "AI Decision",
-    "Reports",
-    "Settings",
-]
-
-PROJECT_TYPES = [
-    "New Project",
-    "Business Expansion",
-    "Asset Replacement",
-    "Technology/Digital Investment",
-    "International/Cross-Border Investment",
-]
-
-PROJECT_TYPE_DESCRIPTIONS = {
-    "New Project": (
-        "A brand-new investment with no pre-existing capacity. Key risks include unproven demand, "
-        "construction and ramp-up delays, and the full cost of building the asset from scratch."
-    ),
-    "Business Expansion": (
-        "Growing existing operations by adding capacity, products, markets, or channels, with "
-        "synergies in shared infrastructure, customers, or staff. Watch cannibalisation and execution speed."
-    ),
-    "Asset Replacement": (
-        "Replacing ageing or inefficient equipment with modern equivalents. Benefits come from lower "
-        "operating costs, higher availability, and fewer breakdowns — often without adding revenue."
-    ),
-    "Technology/Digital Investment": (
-        "Software, automation, digital platforms, or IT infrastructure. Benefits are frequently indirect "
-        "(productivity, data, resilience) and require prudent assumptions and shorter useful lives."
-    ),
-    "International/Cross-Border Investment": (
-        "Entering or expanding in a foreign market. Adds currency, country, political, regulatory and "
-        "operational risk. Run through the FX & Multi-Currency section and re-check when rates move."
-    ),
-}
-
-_CCY = fx.CCY_LABELS
-
-_PALETTE = {
-    "primary": "#38BDF8",
-    "accent": "#22D3EE",
-    "gold": "#FBBF24",
-    "green": "#34D399",
-    "red": "#F87171",
-    "orange": "#F59E0B",
-    "violet": "#A78BFA",
-    "mutemplate": "#8CA3C3",
-}
-
-THEME_CSS = """
+# ═══════════════════════════════════════════════════════════════════════════════
+# CSS — Royal Blue + White + Electric accents + green/amber/red cards
+# ═══════════════════════════════════════════════════════════════════════════════
+def inject_css():
+    st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+/* ── global palette ─────────────────────────────────────── */
+:root{--rb:#1547A0;--rb-light:#1E57B5;--rb-dark:#0D3080;
+       --elec:#3B82F6;--white:#FFFFFF;--off:#F0F4FF;--ink:#0F172A;
+       --green:#15803d;--amber:#d97706;--red:#dc2626;
+       --green-bg:#DCFCE7;--amber-bg:#FEF3C7;--red-bg:#FEE2E2;}
+header[data-testid="stHeader"]{background:var(--rb)!important;}
+header [data-testid="stHeader"] *{color:#fff!important;}
+section[data-testid="stSidebar"]{background:var(--rb)!important;}
+section[data-testid="stSidebar"] *{color:#fff!important;}
+section[data-testid="stSidebar"] label,
+section[data-testid="stSidebar"] .stMarkdown p{color:#fff!important;}
+div[data-testid="stToolbar"]{background:var(--rb)!important;}
 
-html, body, [class*="st-"], [data-testid="stAppViewContainer"] {
-  font-family: 'Inter', -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-}
-[data-testid="stAppViewContainer"] {
-  background: linear-gradient(160deg, #0B1220 0%, #0A1220 40%, #0D1428 100%);
-  color: #E5E7EB;
-}
-[data-testid="stHeader"] { background: transparent; }
-[data-testid="stSidebar"] {
-  background: #0D1526;
-  border-right: 1px solid rgba(148,163,184,0.10);
-}
-[data-testid="stSidebarNav"], [data-testid="stSidebarContent"] { background: transparent; }
-.block-container { padding-top: 1.6rem; padding-bottom: 3rem; max-width: 1500px; }
+/* ── metric cards ──────────────────────────────────────── */
+.metric-card{background:var(--off);border-left:5px solid var(--elec);
+  border-radius:8px;padding:1rem 1.2rem;margin:.4rem 0;}
+.metric-card h3{margin:0 0 4px 0;font-size:.85rem;color:var(--rb);}
+.metric-card p{margin:0;font-size:1.55rem;font-weight:700;color:var(--ink);}
+.metric-card small{color:#64748b;}
 
-h1, h2, h3 { color: #F1F5F9; letter-spacing: -0.015em; font-weight: 700; }
-h1 { font-size: 1.7rem; }
-h2 { font-size: 1.25rem; }
-p, li { color: #D3DCEA; }
+/* ── decision banners ──────────────────────────────────── */
+.decision-banner{border-radius:10px;padding:1rem 1.4rem;font-size:1.15rem;
+  font-weight:700;margin:.6rem 0;text-align:center;}
+.dec-accept{background:var(--green-bg);color:var(--green);border:2px solid var(--green);}
+.dec-review{background:var(--amber-bg);color:var(--amber);border:2px solid var(--amber);}
+.dec-reject{background:var(--red-bg);color:var(--red);border:2px solid var(--red);}
 
-/* Brand header in sidebar */
-.vt-brand { color:#F1F5F9; font-size: 1.35rem; font-weight: 800; letter-spacing: 0.08em; margin: 0 0 2px 0; }
-.vt-brand em { color:#38BDF8; font-style: normal; }
-.vt-tagline { color:#8CA3C3; font-size: 0.72rem; letter-spacing: 0.18em; text-transform: uppercase; margin-bottom: 1rem; }
-
-/* Section header */
-.vt-section { border-bottom:1px solid rgba(148,163,184,0.12); padding-bottom:0.55rem; margin-bottom:1.1rem; }
-.vt-section h1 { margin:0; }
-.vt-section p { color:#8CA3C3; margin:0.25rem 0 0 0; font-size:0.9rem; }
-
-/* KPI cards */
-.vt-kpi {
-  background: linear-gradient(180deg, rgba(23,37,66,0.55), rgba(13,23,46,0.85));
-  border: 1px solid rgba(148,163,184,0.16);
-  border-radius: 12px;
-  padding: 14px 16px 12px 16px;
-  height: 100%;
+/* ── status-light overlay (10-second travelling sweep) ─── */
+@keyframes sweep{0%{clip-path:inset(0 100% 0 0)}100%{clip-path:inset(0 0 0 0)}}
+@keyframes fadeOut{0%{opacity:1}85%{opacity:1}100%{opacity:0}}
+#status-overlay{
+  position:fixed;top:0;left:0;width:100%;height:100%;z-index:9999;
+  display:flex;align-items:center;justify-content:center;
+  pointer-events:none;
+  animation:fadeOut 11s forwards;
 }
-.vt-kpi .k-label { color:#8CA3C3; font-size:0.72rem; letter-spacing:0.12em; text-transform:uppercase; }
-.vt-kpi .k-value { color:#F1F5F9; font-size:1.5rem; font-weight:700; margin-top:4px; }
-.vt-kpi .k-sub { color:#B6C6DE; font-size:0.8rem; margin-top:4px; }
-.vt-kpi .k-sub.accept { color:#34D399; }
-.vt-kpi .k-sub.reject { color:#F87171; }
-.vt-kpi .k-sub.review { color:#FBBF24; }
-.vt-kpi .kbar { height:3px; border-radius:3px; margin-top:10px; }
-@keyframes vtFill { from { width:0 } }
-.vt-kpi .kbar span { display:block; height:3px; border-radius:3px; animation: vtFill 0.8s ease; }
+#status-overlay .box{
+  width:min(520px,88vw);border-radius:14px;padding:1.6rem 2rem;
+  font-size:1.8rem;font-weight:800;text-align:center;
+  color:#fff;
+  box-shadow:0 0 40px rgba(0,0,0,.45);
+  animation:sweep 2s ease-out forwards;
+  clip-path:inset(0 100% 0 0);
+}
+.overlay-accept{background:linear-gradient(135deg,#15803d,#22c55e)!important;}
+.overlay-review{background:linear-gradient(135deg,#d97706,#f59e0b)!important;}
+.overlay-reject{background:linear-gradient(135deg,#dc2626,#ef4444)!important;}
 
-/* Decision banner */
-.vt-decision {
-  border-radius: 14px;
-  padding: 20px 22px;
-  border: 1px solid;
-  margin: 8px 0 18px 0;
-  background: linear-gradient(135deg, rgba(23,37,66,0.55), rgba(13,23,46,0.9));
-}
-.vt-decision.accept { border-color: rgba(52,211,153,0.45); }
-.vt-decision.reject { border-color: rgba(248,113,113,0.5); }
-.vt-decision.review { border-color: rgba(251,191,36,0.5); }
-.vt-decision .d-verdict { font-size:1.5rem; font-weight:800; letter-spacing:0.02em; }
-.vt-decision .d-reason { color:#D3DCEA; margin-top:10px; line-height:1.55; }
-.vt-decision.accept .d-verdict { color:#34D399; }
-.vt-decision.reject .d-verdict { color:#F87171; }
-.vt-decision.review .d-verdict { color:#FBBF24; }
+/* ── robot panel ───────────────────────────────────────── */
+.robot-box{background:linear-gradient(135deg,#0D3080,#1E57B5);
+  color:#fff;border-radius:12px;padding:1.2rem;margin:.6rem 0;}
+.robot-box h4{margin:0 0 6px;color:var(--elec);}
+.robot-box p{margin:0;font-size:.92rem;line-height:1.5;}
 
-/* Small stat chips */
-.vt-chip {
-  display:inline-block; border:1px solid rgba(56,189,248,0.35);
-  background: rgba(56,189,248,0.08); color:#BDE5FF;
-  border-radius:999px; padding:2px 10px; font-size:0.72rem; margin-right:6px;
-}
-
-/* Email preview panel */
-.vt-email {
-  background: rgba(11,18,32,0.7); border:1px solid rgba(148,163,184,0.25);
-  border-radius:12px; padding:14px 16px; margin:6px 0 2px;
-}
-.vt-email-row { display:flex; gap:10px; padding:2px 0; font-size:0.86rem; color:#E5E7EB; }
-.vt-email-key { flex:0 0 110px; color:#8CA3C3; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; font-size:0.72rem; padding-top:3px; }
-.vt-email-body {
-  margin-top:10px; padding:10px 12px; border-radius:8px;
-  background: rgba(2,6,15,0.55); border:1px solid rgba(148,163,184,0.18);
-  color:#DBE4F0; font-family:"JetBrains Mono",Consolas,monospace; font-size:0.8rem;
-  white-space:pre-wrap; word-break:break-word; line-height:1.5;
-}
-
-/* Inline generated report document */
-.vt-report {
-  background: rgba(11,18,32,0.75); border:1px solid rgba(56,189,248,0.28);
-  border-radius:14px; padding:20px 22px; margin:8px 0 4px;
-}
-.vt-report-head { border-bottom:1px solid rgba(148,163,184,0.25); padding-bottom:12px; margin-bottom:6px; }
-.vt-report-head .vr-brand { font-size:1.15rem; font-weight:800; letter-spacing:0.08em; color:#38BDF8; }
-.vt-report-head .vr-brand em { color:#34D399; font-style:normal; }
-.vt-report-head .vr-title { font-size:1.5rem; font-weight:700; color:#F1F5F9; margin-top:6px; }
-.vt-report-head .vr-meta { color:#8CA3C3; font-size:0.78rem; margin-top:4px; }
-.vt-report-sec {
-  color:#7DD3FC; font-weight:700; letter-spacing:0.05em; text-transform:uppercase;
-  font-size:0.78rem; margin:18px 0 8px; padding-bottom:4px; border-bottom:1px solid rgba(56,189,248,0.2);
-}
-.vt-badge {
-  display:inline-block; border-radius:999px; padding:1px 10px; font-size:0.68rem;
-  font-weight:700; letter-spacing:0.06em;
-}
-.vt-badge.accept { background:rgba(52,211,153,0.14); color:#34D399; border:1px solid rgba(52,211,153,0.4); }
-.vt-badge.reject { background:rgba(248,113,113,0.14); color:#F87171; border:1px solid rgba(248,113,113,0.45); }
-.vt-badge.review { background:rgba(251,191,36,0.14); color:#FBBF24; border:1px solid rgba(251,191,36,0.4); }
-.vt-report-note { color:#D3DCEA; font-size:0.86rem; line-height:1.6; margin-top:8px; }
-.vt-report-foot { color:#8CA3C3; font-size:0.75rem; margin-top:18px; border-top:1px solid rgba(148,163,184,0.2); padding-top:10px; }
-.vt-tbl-wrap { overflow-x:auto; margin:6px 0 4px; }
-table.vt-tbl { width:100%; border-collapse:collapse; font-size:0.78rem; color:#E2E8F0; }
-table.vt-tbl th {
-  background:rgba(56,189,248,0.1); color:#7DD3FC; text-align:left;
-  padding:6px 10px; border-bottom:1px solid rgba(56,189,248,0.3); font-weight:600;
-}
-table.vt-tbl td { padding:5px 10px; border-bottom:1px solid rgba(148,163,184,0.12); color:#D3DCEA; }
-table.vt-tbl tr:hover td { background:rgba(56,189,248,0.05); }
-table.vt-tbl td.r { text-align:right; font-family:"JetBrains Mono",Consolas,monospace; }
-table.vt-tbl td.c { text-align:center; }
-
-/* Sidebar nav radio menu rows */
-[data-testid="stSidebar"] div[role="radiogroup"] label {
-  width: 100%;
-  padding: 7px 10px;
-  border-radius: 8px;
-  margin-bottom: 2px;
-  font-size: 0.88rem;
-}
-[data-testid="stSidebar"] div[role="radiogroup"] label:hover { background: rgba(56,189,248,0.07); }
-[data-testid="stSidebar"] div[role="radiogroup"] label[data-checked="true"],
-[data-testid="stSidebar"] div[role="radiogroup"]:has(input:checked) label {
-  background: linear-gradient(90deg, rgba(56,189,248,0.16), rgba(56,189,248,0.02));
-  border: 1px solid rgba(56,189,248,0.28);
-}
-[data-testid="stSidebar"] div[role="radiogroup"] label > div:first-child { display:none; }
-
-/* Expanders */
-[data-testid="stExpander"] { background: rgba(16,26,50,0.5); border:1px solid rgba(148,163,184,0.12); border-radius:10px; }
-[data-testid="stExpander"] details { background: transparent; }
-
-/* Dataframes */
-[data-testid="stDataFrame"] { border-radius:10px; overflow:hidden; }
-
-/* Anti-white enforcement: every surface stays the dark navy theme */
-.stApp,
-[data-testid="stAppViewContainer"],
-[data-testid="stSidebar"],
-[data-testid="stHeader"] { background-color:#0B1220 !important; }
-[data-testid="stSidebar"] { background-color:#0A1020 !important; }
-[data-testid="main"] .block-container { max-width:1400px; padding-top:1.2rem; }
-
-/* Inputs: dark boxes, no white fields */
-[data-testid="stTextInput"] input,
-[data-testid="stNumberInput"] input,
-[data-testid="stTextArea"] textarea,
-[data-testid="stDateInput"] input,
-[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
-[data-testid="stMultiselect"] div[data-baseweb="select"] > div {
-  background-color:#0E1626 !important;
-  color:#E5E7EB !important;
-  border-color:rgba(148,163,184,0.25) !important;
-}
-[data-testid="stTextInput"] input::placeholder,
-[data-testid="stTextArea"] textarea::placeholder { color:#5A6E8C !important; }
-
-/* Dropdown popups and option lists: dark, never white */
-[data-baseweb="popover"],
-div[data-testid="stPopover"],
-[data-baseweb="popover"] div[role="listbox"],
-[data-baseweb="popover"] [role="option"],
-div[role="listbox"] { background-color:#131C2E !important; color:#E5E7EB !important; }
-[data-baseweb="popover"] [role="option"]:hover,
-div[role="listbox"] [role="option"]:hover { background-color:#1E2A45 !important; }
-
-/* Hide the down-arrow chevrons everywhere (select / multiselect / baseweb) */
-[data-testid="stSelectbox"] [data-testid="stIconMaterial"],
-[data-testid="stMultiselect"] [data-testid="stIconMaterial"],
-div[data-baseweb="select"] [data-testid="stIconMaterial"],
-div[data-baseweb="select"] svg { display:none !important; }
-
-/* Hide the up/down stepper arrows on number inputs */
-[data-testid="stNumberInput"] button,
-[data-testid="stNumberInput"] svg { display:none !important; }
-[data-testid="stNumberInput"] input { text-align:right; }
-
-/* File upload (Upload Case Data): dark theme, no arrows */
-[data-testid="stFileUploaderDropzone"] {
-  background-color:#0E1626 !important;
-  border:1px dashed rgba(56,189,248,0.4) !important;
-  color:#E5E7EB !important;
-}
-[data-testid="stFileUploaderDropzone"] svg { display:none !important; }
-[data-testid="stFileUploaderDropzone"] button,
-[data-testid="stFileUploaderDropzone"] [data-testid="stFileUploaderBrowseFile" i],
-section[data-testid="stFileUploader"] button {
-  background-color:#1E2A45 !important;
-  color:#E5E7EB !important;
-}
-[data-testid="stFileUploaderDropzone"] [data-testid="stFileUploaderFile"] { border-color:rgba(148,163,184,0.25); }
-
-/* Expanders: hide the arrow chevrons in the title rows, keep the boxes clean */
-[data-testid="stExpander"] summary svg,
-[data-testid="stExpander"] [data-testid="stExpanderIcon"],
-[data-testid="stExpander"] [data-testid="stExpander"] summary > button svg { display:none !important; }
-
-/* Buttons: dark, readable text inside light/filled buttons */
-[data-testid="stButton"] button[kind="primary"],
-[data-testid="stFormSubmitButton"] button[kind="primary"],
-button[kind="primary"][data-testid="baseButton-primary"],
-[data-testid="stDownloadButton"] button[kind="primary"] {
-  color:#0B1220 !important; font-weight:700;
-}
-[data-testid="stButton"] button[kind="primary"]:hover,
-[data-testid="stFormSubmitButton"] button[kind="primary"]:hover {
-  color:#0B1220 !important;
-}
-
-/* Segmented control (Project Type): full dark theme */
-[data-testid="stSegmentedControl"] [aria-checked="true"],
-[data-testid="stSegmentedControl"] [data-checked="true"] {
-  background: rgba(56,189,248,0.16) !important;
-  color:#7DD3FC !important;
-  border:1px solid rgba(56,189,248,0.4) !important;
-}
-[data-testid="stSegmentedControl"] [aria-checked="true"] *,
-[data-testid="stSegmentedControl"] [data-checked="true"] * {
-  color:#7DD3FC !important;
-}
-[data-testid="stSegmentedControl"] [aria-checked="false"],
-[data-testid="stSegmentedControl"] [data-checked="false"] {
-  color:#E5E7EB !important;
-}
-
-/* Dividers, captions, info */
-hr { border-color: rgba(148,163,184,0.12); }
-[data-testid="stCaptionContainer"] { color:#7E93B6; }
+/* ── pill badges ───────────────────────────────────────── */
+.pill{display:inline-block;border-radius:14px;padding:2px 10px;font-size:.78rem;font-weight:600;margin:0 4px;}
+.pill-live{background:#DCFCE7;color:#15803d;}
+.pill-demo{background:#FEF3C7;color:#92400e;}
+.pill-info{background:#E0E7FF;color:#1547A0;}
 </style>
-"""
-
-_INJECTED = False
+""", unsafe_allow_html=True)
 
 
-def inject_theme() -> None:
-    global _INJECTED
-    if _INJECTED:
-        return
-    st.markdown(THEME_CSS, unsafe_allow_html=True)
-    _INJECTED = True
-
-
-# ---------------------------------------------------------------------------
-# Shared UI helpers
-# ---------------------------------------------------------------------------
-
-def fmt_money(v: float | None, ccy: str = "USD") -> str:
-    if v is None or not np.isfinite(v):
-        return "N/A"
-    sym = f"{_CCY.get(ccy, ccy)} "
-    return f"{sym}{v:,.0f}" if v >= 0 else f"({sym}{abs(v):,.0f})"
-
-
-def fmt_pct(v: float | None) -> str:
-    if v is None or not np.isfinite(v):
-        return "N/A"
-    return f"{v:.2f}%"
-
-
-def fmt_num(v: float | None, digits: int = 2) -> str:
-    if v is None or not np.isfinite(v):
-        return "N/A"
-    return f"{v:,.{digits}f}"
-
-
-def status_tone(status: str) -> str:
-    return {"ACCEPT": "accept", "REJECT": "reject", "REVIEW": "review"}.get(status, "review")
-
-
-def section_header(title: str, subtitle: str | None = None):
-    sub = f"<p>{subtitle}</p>" if subtitle else ""
-    st.markdown(f'<div class="vt-section"><h1>{title}</h1>{sub}</div>', unsafe_allow_html=True)
-
-
-def kpi_row(items: list[tuple[str, str, str]]):
-    """items: (label, value, sub) rendered as a responsive KPI strip."""
-    cols = st.columns(len(items))
-    for col, (label, value, sub) in zip(cols, items):
-        col.markdown(
-            f'<div class="vt-kpi"><div class="k-label">{label}</div>'
-            f'<div class="k-value">{value}</div><div class="k-sub">{sub}</div></div>',
-            unsafe_allow_html=True,
-        )
-
-
-def decision_banner(final: dict[str, str]):
-    tone = status_tone(final["decision"])
-    verdict = {
-        "ACCEPT": "ACCEPT — PROCEED WITH INVESTMENT",
-        "REJECT": "REJECT — DO NOT PROCEED",
-        "REVIEW": "REVIEW — FURTHER ANALYSIS REQUIRED",
-    }[final["decision"]]
+def metric_card(label: str, value: str, sub: str = ""):
+    sub_html = f"<small>{sub}</small>" if sub else ""
     st.markdown(
-        f'<div class="vt-decision {tone}"><div class="d-verdict">{verdict}</div>'
-        f'<div class="d-reason">{final["reason"]}</div></div>',
-        unsafe_allow_html=True,
-    )
+        f'<div class="metric-card"><h3>{label}</h3><p>{value}</p>{sub_html}</div>',
+        unsafe_allow_html=True)
 
 
-def empty_state(title: str, hint: str):
+def decision_banner(status: str, score: float, grade: str, reasons: list[str]):
+    cls = {"ACCEPT": "dec-accept", "REVIEW": "dec-review", "REJECT": "dec-reject"}[status]
+    icon = {"ACCEPT": "🟢", "REVIEW": "🟠", "REJECT": "🔴"}[status]
+    html = f'<div class="decision-banner {cls}">{icon} {grade} — Score {score:.0f}/100</div>'
+    for r in reasons[:6]:
+        html += f'<div style="padding:2px 12px;font-size:.88rem;color:#334155;">• {r}</div>'
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def status_light_overlay(status: str):
+    cls = {"ACCEPT": "overlay-accept", "REVIEW": "overlay-review", "REJECT": "overlay-reject"}[status]
+    icon = {"ACCEPT": "🟢", "REVIEW": "🟠", "REJECT": "🔴"}[status]
     st.markdown(
-        f'<div class="vt-decision review"><div class="d-verdict">{title}</div>'
-        f'<div class="d-reason">{hint}</div></div>',
-        unsafe_allow_html=True,
-    )
+        f"""<div id="status-overlay">
+<div class="box {cls}">{icon} DECISION: {status}</div></div>""",
+        unsafe_allow_html=True)
 
 
-def plotly_dark(fig: go.Figure, title: str, height: int = 400) -> go.Figure:
-    fig.update_layout(
-        template="plotly_dark",
-        title=dict(text=title, font=dict(color="#F1F5F9", size=14)),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(12,20,42,0.55)",
-        font=dict(family="Inter, sans-serif", color="#D3DCEA", size=11),
-        height=height,
-        hovermode="x unified",
-        margin=dict(l=40, r=20, t=56, b=40),
-        legend=dict(bgcolor="rgba(0,0,0,0)"),
-    )
-    fig.update_xaxes(gridcolor="rgba(148,163,184,0.14)", zeroline=False)
-    fig.update_yaxes(gridcolor="rgba(148,163,184,0.14)", zeroline=False)
-    return fig
+# ═══════════════════════════════════════════════════════════════════════════════
+# SESSION STATE INIT
+# ═══════════════════════════════════════════════════════════════════════════════
+def _now_utc() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 
-def data_colored(df: pd.DataFrame) -> pd.DataFrame:
-    """Return a display copy with float formatting pleasant for dark UI."""
-    out = df.copy()
-    for col in out.columns:
-        s = out[col]
-        if pd.api.types.is_float_dtype(s):
-            out[col] = s.map(lambda v: f"{v:,.2f}" if pd.notna(v) else "")
-    return out
+def _init():
+    for k, v in {
+        "logged_in": False, "username": "", "role": "GUEST",
+        "bundle": None, "portfolio": [],
+        "compare_analyses": {},   # name -> AnalysisBundle (Compare & Select)
+        "ask_history": [],
+        "fx_user_rates": dict(ProjectInput().fx_rates),
+        "fx_live_info": None,
+    }.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+_init()
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# LOGIN PAGE  (Royal-blue + white)
+# ═══════════════════════════════════════════════════════════════════════════════
+def login_page():
+    inject_css()
+    logo = ASSETS / "capexx_logo.png"
+    if logo.exists():
+        st.image(str(logo), width=200)
+    st.markdown("""
+<div style="background:#1547A0;color:#fff;border-radius:12px;padding:1.4rem 2rem;margin-bottom:1rem;">
+<h2 style="margin:0;color:#fff;">🏛️ CAPEXX AI AGENT</h2>
+<p style="margin:4px 0 0;color:#93C5FD;font-size:.92rem;">
+AI-Powered Capital Project Decision Intelligence</p>
+</div>
+""", unsafe_allow_html=True)
+
+    st.markdown("""
+<div style="background:#EEF2FF;border-left:4px solid #1547A0;border-radius:6px;padding:.7rem 1rem;margin-bottom:.8rem;">
+<strong style="color:#1547A0;">DEMO CREDENTIALS — NOT FOR PRODUCTION</strong><br>
+<span style="color:#334155;font-size:.88rem;">
+Admin: <code>FraiserXX</code> / <code>M251232@1</code> &nbsp;|&nbsp;
+Admin: <code>admin</code> / <code>admin123</code> &nbsp;|&nbsp;
+Anyone may register as Guest.
+</span>
+</div>
+""", unsafe_allow_html=True)
+
+    tab_login, tab_register = st.tabs(["LOGIN", "REGISTER GUEST"])
+    with tab_login:
+        user = st.text_input("Username", key="login_user")
+        pw   = st.text_input("Password", type="password", key="login_pw")
+        if st.button("SIGN IN", type="primary", width="stretch"):
+            res = verify(user, pw)
+            if res["ok"]:
+                st.session_state.logged_in = True
+                st.session_state.username  = user
+                st.session_state.role      = res.get("role", "GUEST")
+                st.rerun()
+            else:
+                st.error(res["message"])
+    with tab_register:
+        ru = st.text_input("Choose username", key="reg_user")
+        rp = st.text_input("Choose password", type="password", key="reg_pw")
+        if st.button("REGISTER", width="stretch"):
+            res = register(ru, rp)
+            if res["ok"]:
+                st.success(res["message"])
+            else:
+                st.warning(res["message"])
 
 
-def get_state() -> dict[str, Any]:
-    return st.session_state.setdefault("vtx", {})
+# ═══════════════════════════════════════════════════════════════════════════════
+# SIDEBAR
+# ═══════════════════════════════════════════════════════════════════════════════
+PAGES = ["🏠 Home", "📊 Project Analysis", "📁 Portfolio", "⚖️ Compare & Select",
+         "💱 Exchange Rates", "🤖 ASK CAPEXX AI", "📤 Reports & Delivery", "ℹ️ About"]
 
-
-# ---------------------------------------------------------------------------
-# Engine wiring
-# ---------------------------------------------------------------------------
-
-def run_case(inputs: ProjectInputs) -> dict[str, Any]:
-    with st.spinner("Running the full financial analysis..."):
-        results = run_analysis(inputs)
-        risk_results = assess_risks(results)
-        scenarios = build_scenarios(results)
-        sens_df, sens_summary = run_sensitivity(inputs, results)
-        final = rg.decision_final(results, risk_results)
-    state = get_state()
-    state.update(
-        {
-            "inputs": inputs,
-            "results": results,
-            "risk_results": risk_results,
-            "scenarios": scenarios,
-            "sens_df": sens_df,
-            "sens_summary": sens_summary,
-            "final": final,
-            "project_type": st.session_state.get("vtx_project_type", "New Project"),
-        }
-    )
-    return state
-
-
-def risk_score(risk_results: dict[str, Any]) -> int:
-    scores = [r.score for r in risk_results.get("risks", [])]
-    return max(scores) if scores else 1
-
-
-def risk_label(score: int) -> str:
-    return {1: "LOW", 2: "MODERATE", 3: "HIGH", 4: "VERY HIGH"}.get(score, "MODERATE")
-
-
-# ---------------------------------------------------------------------------
-# Sidebar: brand, navigation, case inputs
-# ---------------------------------------------------------------------------
-
-def render_sidebar() -> str:
+def sidebar():
     with st.sidebar:
         st.markdown(
-            '<div class="vt-brand">VALTEXA<em>.</em></div>'
-            '<div class="vt-tagline">Institutional Financial Decision Platform</div>',
-            unsafe_allow_html=True,
-        )
-        section = st.radio("Navigate", NAV_SECTIONS, key="nav_section", label_visibility="collapsed")
-        st.markdown("---")
-
-        state = get_state()
-        if state.get("results") is not None:
-            st.caption(
-                f"Active case: **{state['inputs'].project_name}** — "
-                f"{state['final']['decision']}"
-            )
-            if st.button("Clear case", key="clear_case"):
-                for key in [
-                    "inputs", "results", "risk_results", "scenarios",
-                    "sens_df", "sens_summary", "final", "project_type",
-                ]:
-                    st.session_state.get("vtx", {}).pop(key, None)
-                st.rerun()
-
-        with st.expander("Investment Inputs", expanded=True):
-            ptype = st.segmented_control(
-                "Project Type",
-                PROJECT_TYPES,
-                default=PROJECT_TYPES[0],
-                key="vtx_ptype_buttons",
-                selection_mode="single",
-                help="Tap a button to choose the case type.",
-            )
-            ptype = ptype if ptype in PROJECT_TYPES else PROJECT_TYPES[0]
-            st.caption(PROJECT_TYPE_DESCRIPTIONS.get(ptype, PROJECT_TYPE_DESCRIPTIONS[PROJECT_TYPES[0]]))
-            _sidebar_input_form(ptype)
-
-        with st.expander("Upload Case Data (CSV / Excel)", expanded=False):
-            _sidebar_uploader(ptype)
-    return section
+            f"### 🏛️ CAPEXX AI\n"
+            f"**{st.session_state.username}** · {st.session_state.role}",
+            unsafe_allow_html=False)
+        page = st.radio("Navigate", PAGES, label_visibility="collapsed")
+        st.divider()
+        st.caption("CAPEXX AI AGENT © 2026")
+        st.caption("Decision-support only · Not financial advice")
+        return page
 
 
-def _sidebar_input_form(project_type: str) -> None:
-    with st.form("valtexa_input_form"):
-        c1, c2 = st.columns(2)
-        project_name = c1.text_input("Project name", value=project_type)
-        project_life = c2.number_input("Project life (years)", min_value=1.0, max_value=100.0, value=10.0, step=1.0)
-        initial_investment = c1.number_input("Initial investment", min_value=0.0, value=1_000_000.0, step=50_000.0, format="%.0f")
-        annual_revenues = c2.number_input("Annual revenues", min_value=0.0, value=350_000.0, step=10_000.0, format="%.0f")
-        operating_costs = c1.number_input("Operating costs", min_value=0.0, value=80_000.0, step=10_000.0, format="%.0f")
-        tax_rate = c2.number_input("Tax rate (%)", min_value=0.0, max_value=100.0, value=25.0, step=0.5)
-        discount_rate = c1.number_input("WACC / Discount rate (%)", min_value=0.01, max_value=100.0, value=10.0, step=0.5)
-        financing_rate = c2.number_input("Financing rate (%)", min_value=0.01, max_value=100.0, value=10.0, step=0.5)
-        reinvestment_rate = c1.number_input("Reinvestment rate (%)", min_value=0.01, max_value=100.0, value=10.0, step=0.5)
-        working_capital = c2.number_input("Working capital", min_value=0.0, value=0.0, step=10_000.0, format="%.0f")
-        terminal_value = c1.number_input("Terminal value", min_value=0.0, value=0.0, step=50_000.0, format="%.0f")
-        rev_growth = c2.number_input("Revenue growth (%/yr)", value=0.0, step=0.5)
-        cost_growth = c1.number_input("Cost growth (%/yr)", value=0.0, step=0.5)
-        terminal_growth = c2.number_input("Terminal growth (%/yr)", value=0.0, step=0.25)
-        description = st.text_area(
-            "Description (leave blank to use the Project Type description)",
-            height=64,
-            placeholder=PROJECT_TYPE_DESCRIPTIONS[project_type][:120] + "…",
-        )
-        submitted = st.form_submit_button("Run Analysis", type="primary")
+# ═══════════════════════════════════════════════════════════════════════════════
+# HOME — Cinematic + Market simulation ticker + Robot
+# ═══════════════════════════════════════════════════════════════════════════════
+def _img_b64(path: Path) -> str:
+    if not path.exists():
+        return ""
+    return base64.b64encode(path.read_bytes()).decode()
 
-    if submitted:
-        validation = dv.validate_project_inputs(
-            {
-                "project_name": project_name,
-                "project_life": project_life,
-                "initial_investment": initial_investment,
-                "annual_revenues": annual_revenues,
-                "operating_costs": operating_costs,
-                "tax_rate": tax_rate,
-                "discount_rate": discount_rate,
-                "working_capital": working_capital,
-                "terminal_value": terminal_value,
-                "growth_rate": rev_growth,
-            }
-        )
-        if not validation.is_valid:
-            st.error("Validation failed:" + "\n".join(f"\n- {e}" for e in validation.errors))
-            return
-        inputs = ProjectInputs(
-            project_name=project_name,
-            project_description=(description.strip() or PROJECT_TYPE_DESCRIPTIONS[project_type]),
-            initial_investment=float(initial_investment),
-            project_life=float(project_life),
-            annual_revenues=float(annual_revenues),
-            revenue_growth_rate=float(rev_growth),
-            operating_costs=float(operating_costs),
-            cost_growth_rate=float(cost_growth),
-            tax_rate=float(tax_rate),
-            working_capital=float(working_capital),
-            terminal_value=float(terminal_value),
-            terminal_growth_rate=float(terminal_growth),
-            discount_rate=float(discount_rate),
-            financing_rate=float(financing_rate),
-            reinvestment_rate=float(reinvestment_rate),
-        )
-        run_case(inputs)
-        st.success("Analysis complete. Open the Executive Dashboard.")
-
-
-def _sidebar_uploader(project_type: str) -> None:
-    f = st.file_uploader(
-        f"CSV / Excel for '{project_type}'",
-        type=["csv", "xlsx", "xls"],
-        key=f"valtexa_upload_{project_type.replace('/', '_')}",
-    )
-    if f is None:
-        return
-    try:
-        df = pd.read_csv(f) if f.name.lower().endswith(".csv") else pd.read_excel(f)
-        vres, data = dv.validate_csv_upload(df)
-        if not vres.is_valid:
-            st.error("Upload validation failed:" + "\n".join(f"\n- {e}" for e in vres.errors))
-            return
-        for w in vres.warnings:
-            st.warning(w)
-        if not data:
-            st.info("No usable project row found in the file.")
-            return
-        inputs = ProjectInputs(
-            project_name=str(data.get("project_name") or f"{project_type} (uploaded)"),
-            project_description=str(
-                data.get("project_description") or f"{project_type} — from uploaded file {f.name}."
-            ),
-            initial_investment=float(data["initial_investment"]),
-            project_life=float(data["project_life"]),
-            annual_revenues=float(data["annual_revenues"]),
-            operating_costs=float(data["operating_costs"]),
-            tax_rate=float(data["tax_rate"]),
-            working_capital=float(data.get("working_capital", 0)),
-            terminal_value=float(data.get("terminal_value", 0)),
-            discount_rate=float(data["discount_rate"]),
-            financing_rate=float(data.get("financing_rate", data["discount_rate"])),
-            reinvestment_rate=float(data.get("reinvestment_rate", data["discount_rate"])),
-            revenue_growth_rate=float(data.get("growth_rate", 0)),
-        )
-        run_case(inputs)
-        st.success(f"Uploaded {f.name} — case loaded and analysed.")
-    except Exception as exc:  # noqa: BLE001
-        st.error(f"Failed to parse file: {exc}")
-
-
-# ---------------------------------------------------------------------------
-# Charts
-# ---------------------------------------------------------------------------
-
-def build_cashflow_chart(results: dict[str, Any]) -> go.Figure:
-    d = results["chart_data"]
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
-    fig.add_trace(
-        go.Bar(
-            x=d["years"], y=d["net_cash_flows"],
-            name="Net cash flow (incl. terminal value)",
-            marker_color="#1E3A8A",
-            marker_line_color="#38BDF8", marker_line_width=0.6,
-        ),
-        secondary_y=False,
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=d["years"], y=d["cumulative_cash_flows"],
-            name="Cumulative cash flow", mode="lines+markers",
-            line=dict(color="#FBBF24", width=2.6),
-        ),
-        secondary_y=True,
-    )
-    fig.add_hline(y=0, line_dash="dash", line_color="rgba(148,163,184,0.4)")
-    return plotly_dark(fig, "Annual & cumulative cash flows", 400)
-
-
-def build_pv_chart(results: dict[str, Any]) -> go.Figure:
-    d = results["chart_data"]
-    fig = go.Figure()
-    fig.add_trace(go.Bar(x=d["years"], y=d["present_values"], name="Present value", marker_color="#38BDF8", opacity=0.85))
-    fig.add_trace(
-        go.Scatter(x=d["years"], y=d["cumulative_present_values"], name="Cumulative PV",
-                   mode="lines+markers", line=dict(color="#FBBF24", width=2.4))
-    )
-    fig.add_hline(y=0, line_dash="dash", line_color="rgba(148,163,184,0.4)")
-    return plotly_dark(fig, "Present values of cash flows (WACC-discounted)", 360)
-
-
-def build_scenario_chart(scenarios: dict[str, Any]) -> go.Figure:
-    labels = [s["label"] for s in scenarios.values()]
-    npvs = [s["summary"]["npv"] for s in scenarios.values()]
-    colors = ["#34D399", "#38BDF8", "#F87171"]
-    fig = go.Figure(
-        go.Bar(
-            x=labels, y=npvs, marker_color=colors,
-            text=[fmt_money(v) for v in npvs], textposition="outside",
-        )
-    )
-    fig.add_hline(y=0, line_dash="dash", line_color="rgba(148,163,184,0.4)")
-    return plotly_dark(fig, "Scenario NPV comparison", 340)
-
-
-def build_sensitivity_chart(sens_df: pd.DataFrame) -> go.Figure:
-    df = sens_df.sort_values("Spread")
-    fig = go.Figure(
-        go.Bar(
-            y=df["Variable"], x=df["Spread"], orientation="h",
-            marker_color="#38BDF8", opacity=0.9,
-            text=[fmt_money(v) for v in df["Spread"]], textposition="outside",
-        )
-    )
-    return plotly_dark(fig, "NPV sensitivity by variable (30% swing)", 380)
-
-
-def build_risk_chart(risk_results: dict[str, Any]) -> go.Figure:
-    risks = risk_results["risks"]
-    names = [r.risk for r in risks]
-    scores = [r.score for r in risks]
-    colors = {1: "#34D399", 2: "#FBBF24", 3: "#F59E0B", 4: "#F87171"}
-    fig = go.Figure(go.Bar(x=scores, y=names, orientation="h", marker_color=[colors[s] for s in scores]))
-    fig.update_layout(xaxis=dict(range=[0, 4.6], tickmode="array", tickvals=[1, 2, 3, 4], ticktext=["Low", "Moderate", "High", "Very High"]))
-    return plotly_dark(fig, "Risk severity profile", 360)
-
-
-def build_dcf_val_chart(results: dict[str, Any], metrics: dict[str, Any]) -> go.Figure:
-    fig = go.Figure(
-        go.Waterfall(
-            name="Value creation",
-            orientation="v",
-            measure=["absolute", "relative", "relative"],
-            x=["PV of cash flows", "Initial investment", "Net present value"],
-            y=[
-                metrics["total_project_value"],
-                -metrics["initial_investment"],
-                metrics["npv"],
-            ],
-            connector={"line": {"color": "rgba(148,163,184,0.5)"}},
-            increasing={"marker": {"color": "#34D399"}},
-            decreasing={"marker": {"color": "#F87171"}},
-            totals={"marker": {"color": "#38BDF8"}},
-        )
-    )
-    return plotly_dark(fig, "Value creation bridge (DCF value vs investment, net of NPV)", 360)
-
-
-# ---------------------------------------------------------------------------
-# Sections
-# ---------------------------------------------------------------------------
-
-def render_executive_dashboard():
-    section_header(
-        "Executive Dashboard",
-        "Decision-first view: the recommendation, the value it creates, and the evidence, "
-        "before everything else. Drill down through the left navigation.",
-    )
-    state = get_state()
-    results = state.get("results")
-    if results is None:
-        empty_state(
-            "No case analysed yet",
-            "Enter the project's assumptions in the sidebar (Investment Inputs) and press "
-            "Run Analysis, or upload a CSV/Excel case. The dashboard will then show the "
-            "recommendation, KPIs, cash-flow analysis and risk."
-        )
-        return
-
-    metrics = results["metrics"]
-    final = state["final"]
-    risk_results = state["risk_results"]
-    scenarios = state["scenarios"]
-    rscore = risk_score(risk_results)
-
-    kpi_row(
-        [
-            ("Net Present Value", fmt_money(metrics["npv"]), f"WACC {fmt_pct(metrics['wacc'] if 'wacc' in metrics else metrics['discount_rate'])}"),
-            ("Internal Rate of Return", fmt_pct(metrics["irr"]), f"MIRR {fmt_pct(metrics['mirr'])}"),
-            ("Return on Investment", fmt_pct(metrics["roi"]), f"Payback {fmt_num(metrics['payback'])} yrs"),
-            ("Risk Score", f"{risk_label(rscore)}",
-             f"{rscore}/4 · {[r.risk for r in risk_results['risks'] if r.score == rscore][0] if risk_results['risks'] else '—'}"),
-            ("Recommended Project", state["inputs"].project_name, final["decision"]),
-        ]
-    )
-
-    st.markdown("#### Investment Decision")
-    decision_banner(final)
-    st.markdown(f"**Recommendation.** {final['recommendation']}")
-
-    st.markdown("#### Value & Cash-Flow Profile")
-    chart_col, table_col = st.columns([3, 2])
-    with chart_col:
-        st.plotly_chart(build_cashflow_chart(results), width="stretch")
-        st.plotly_chart(build_dcf_val_chart(results, metrics), width="stretch")
-    with table_col:
-        with st.expander("Cash flow table", expanded=True):
-            st.dataframe(data_colored(results["cash_flow_table"]), width="stretch", height=300)
-        with st.expander("DCF table", expanded=True):
-            st.dataframe(data_colored(results["dcf_table"]), width="stretch", height=300)
-
-    p1, p2 = st.columns(2)
-    with p1:
-        st.markdown("#### Scenario Analysis")
-        for key in ["best", "base", "worst"]:
-            s = scenarios[key]
-            sm = s["summary"]
+def cinematic_strip():
+    imgs = [
+        (ASSETS / "rbz.jpg",        "Reserve Bank of Zimbabwe, Harare",
+         "Markets move. Rates change. Capital projects carry real uncertainty."),
+        (ASSETS / "gzu_innovation_hub.jpg",
+         "GZU Innovation Hub · Great Zimbabwe University",
+         "HYPOTHETICAL DEMONSTRATION — not actual GZU financial data."),
+        (ASSETS / "global_finance.jpg", "Global Finance",
+         "CAPEXX evaluates projects for any institution, anywhere in the world."),
+        (ASSETS / "engineers.jpg",  "Engineering & Delivery",
+         "Construction cost, delay, currency and risk — all in one engine."),
+    ]
+    for img, caption, note in imgs:
+        b64 = _img_b64(img)
+        if b64:
             st.markdown(
-                f'<div class="vt-kpi" style="margin-bottom:8px"><div class="k-label">{s["label"]}</div>'
-                f'<div class="k-value">{fmt_money(sm["npv"])}</div>'
-                f'<div class="k-sub {status_tone(sm['decision'])}">{sm["decision"]}</div></div>',
-                unsafe_allow_html=True,
-            )
-    with p2:
-        st.markdown("#### FX & Multi-Currency Exposure")
-        board = fx.build_board_frame(_fx_live())
-        st.dataframe(board, width="stretch", height=220)
-        st.caption(
-            "Rates used to convert any multi-currency position. Overrides always win; "
-            "stale stored rates are labelled."
-        )
-
-    st.markdown("#### Project Ranking")
-    tp_result = st.session_state.get("tp_result")
-    if tp_result is not None:
-        rank = tp_result["ranking_df"]
-        st.dataframe(
-            rank[["Rank", "Project", "Name", "Composite Score", "Risk"]].head(6),
-            width="stretch", height=200,
-        )
-        st.caption("Ranking from the Three-Project Comparison. Re-run that section to update.")
-    else:
-        st.info(
-            "No cross-project ranking yet. Open Project Comparison to score Projects A, B and C "
-            "(in USD / ZAR / ZiG) and rank them."
-        )
+                f'<div style="margin:.6rem 0;border-radius:10px;overflow:hidden;'
+                f'position:relative;">'
+                f'<img src="data:image/jpeg;base64,{b64}" '
+                f'style="width:100%;height:220px;object-fit:cover;">'
+                f'<div style="position:absolute;bottom:0;left:0;width:100%;'
+                f'background:linear-gradient(transparent,rgba(0,0,0,.78));'
+                f'padding:1rem;">'
+                f'<span style="color:#fff;font-weight:700;">{caption}</span>'
+                f'<br><small style="color:#93C5FD;">{note}</small></div></div>',
+                unsafe_allow_html=True)
 
 
-def render_investment_cases():
-    section_header(
-        "Investment Cases",
-        "The active case and its assumptions at a glance. Cases are the single source that every "
-        "section and report is computed from.",
-    )
-    state = get_state()
-    inputs = state.get("inputs")
-    if inputs is None:
-        empty_state("No case loaded", "Enter inputs in the sidebar or upload a file.")
-        return
-
-    st.markdown(f"#### Active case — {inputs.project_name}")
+def market_ticker():
+    st.markdown("---")
     st.markdown(
-        f'<span class="vt-chip">{state.get("project_type", "Case")}</span>'
-        f'<span class="vt-chip">Life {inputs.project_life:.0f} yrs</span>'
-        f'<span class="vt-chip">WACC {inputs.discount_rate:.2f}%</span>'
-        f'<span class="vt-chip">Tax {inputs.tax_rate:.2f}%</span>',
-        unsafe_allow_html=True,
-    )
-    st.markdown(inputs.project_description)
-
-    assumption_rows = {
-        "Project life (years)": f"{inputs.project_life:.0f}",
-        "Initial investment": fmt_money(inputs.initial_investment),
-        "Annual revenues": fmt_money(inputs.annual_revenues),
-        "Revenue growth (%/yr)": fmt_num(inputs.revenue_growth_rate),
-        "Operating costs": fmt_money(inputs.operating_costs),
-        "Cost growth (%/yr)": fmt_num(inputs.cost_growth_rate),
-        "Tax rate": fmt_pct(inputs.tax_rate),
-        "WACC / discount rate": fmt_pct(inputs.discount_rate),
-        "Financing rate": fmt_pct(inputs.financing_rate),
-        "Reinvestment rate": fmt_pct(inputs.reinvestment_rate),
-        "Working capital": fmt_money(inputs.working_capital),
-        "Terminal value": fmt_money(inputs.terminal_value),
-        "Terminal growth (%/yr)": fmt_num(inputs.terminal_growth_rate),
-    }
-    st.dataframe(
-        pd.DataFrame({"Assumption": list(assumption_rows), "Value": list(assumption_rows.values())}),
-        width="stretch", height=440,
-    )
+        '<div style="background:#1547A0;color:#fff;border-radius:8px;'
+        'padding:.5rem 1rem;font-size:.78rem;margin-bottom:.4rem;">'
+        '📈 MARKET SIMULATION — DEMONSTRATION ONLY · '
+        'Prices shown are randomly generated within the app · '
+        'NOT live market data · No live source connected</div>',
+        unsafe_allow_html=True)
+    df = market_snapshot()
+    cols = st.columns(len(df))
+    for col, (_, row) in zip(cols, df.iterrows()):
+        chg = row["Change %"]
+        colour = "#15803d" if chg >= 0 else "#dc2626"
+        arrow  = "▲" if chg >= 0 else "▼"
+        col.markdown(
+            f'<div style="text-align:center;background:#F0F4FF;border-radius:8px;'
+            f'padding:.5rem .3rem;">'
+            f'<div style="font-size:.72rem;color:#64748b;">{row["Ticker"]}</div>'
+            f'<div style="font-size:1.05rem;font-weight:700;">{row["Last"]:.4f}</div>'
+            f'<div style="color:{colour};font-weight:600;font-size:.82rem;">'
+            f'{arrow} {chg:+.2f}%</div></div>',
+            unsafe_allow_html=True)
 
 
-def render_capital_budgeting():
-    section_header(
-        "Capital Budgeting",
-        "Cash-flow construction, payback and capital-efficiency thresholds.",
-    )
-    state = get_state()
-    results = state.get("results")
-    if results is None:
-        empty_state("No case loaded", "Run an analysis from the sidebar first.")
-        return
-    metrics = results["metrics"]
-    decisions = results["decisions"]
-
-    kpi_row(
-        [
-            ("Payback period", f"{fmt_num(metrics['payback'])} yrs",
-             f"vs life {metrics['project_life']:.0f} yrs — {decisions['payback']['status']}"),
-            ("Profitability index", fmt_num(metrics["pi"], 3),
-             f"{decisions['pi']['status']} — hurdle 1.00"),
-            ("NPV", fmt_money(metrics["npv"]), decisions["npv"]["status"]),
-            ("IRR vs WACC", f"{fmt_pct(metrics['irr'])} vs {fmt_pct(metrics['discount_rate'])}",
-             decisions["irr"]["status"]),
-        ]
-    )
-    st.plotly_chart(build_cashflow_chart(results), width="stretch")
-    st.markdown(f"**Payback interpretation.** {decisions['payback']['reason']}")
-    st.markdown(f"**PI interpretation.** {decisions['pi']['reason']}")
-    with st.expander("Full cash-flow table", expanded=True):
-        st.dataframe(data_colored(results["cash_flow_table"]), width="stretch")
-
-
-def render_dcf_valuation():
-    section_header(
-        "DCF & Valuation",
-        "Discounted cash-flow valuation of the case at the cost of capital.",
-    )
-    state = get_state()
-    results = state.get("results")
-    if results is None:
-        empty_state("No case loaded", "Run an analysis from the sidebar first.")
-        return
-    metrics = results["metrics"]
-    col1, col2 = st.columns(2)
-    with col1:
-        kpi_row(
-            [
-                ("Total project value (PV)", fmt_money(metrics["total_project_value"]),
-                 f"Investment {fmt_money(metrics['initial_investment'])}"),
-                ("PV of terminal value", fmt_money(metrics["pv_terminal"]), "Gordon / explicit terminal"),
-                ("Net present value", fmt_money(metrics["npv"]), "Value minus investment"),
-            ]
-        )
-    with col2:
-        st.plotly_chart(build_dcf_val_chart(results, metrics), width="stretch")
-
-    st.plotly_chart(build_pv_chart(results), width="stretch")
-    with st.expander("DCF valuation table", expanded=True):
-        st.dataframe(data_colored(results["dcf_table"]), width="stretch")
-    st.info(
-        "Method: each period's free cash flow is discounted at the WACC. Total project value is the "
-        "present value of operating cash flows including terminal value; NPV subtracts the initial "
-        "investment."
-    )
-
-
-def render_returns():
-    section_header(
-        "Returns",
-        "Return measures: NPV, IRR, MIRR, ROI, holding-period and annualised returns.",
-    )
-    state = get_state()
-    results = state.get("results")
-    if results is None:
-        empty_state("No case loaded", "Run an analysis from the sidebar first.")
-        return
-    metrics = results["metrics"]
-    decisions = results["decisions"]
-
-    kpi_row(
-        [
-            ("NPV", fmt_money(metrics["npv"]), decisions["npv"]["reason"]),
-            ("IRR", fmt_pct(metrics["irr"]), decisions["irr"]["reason"]),
-            ("MIRR", fmt_pct(metrics["mirr"]), decisions["mirr"]["reason"]),
-            ("ROI", fmt_pct(metrics["roi"]),
-             f"HPR {fmt_pct(metrics['holding_period_return'])} · annualised {fmt_pct(metrics['annualized_return'])}"),
-        ]
-    )
-    st.markdown("### Thresholds & verdicts")
-    for card in [
-        ("NPV", metrics["npv"], decisions["npv"]),
-        ("IRR", metrics["irr"], decisions["irr"]),
-        ("MIRR", metrics["mirr"], decisions["mirr"]),
-        ("ROI", metrics["roi"], decisions["roi"]),
-        ("Profitability index", metrics["pi"], decisions["pi"]),
-        ("Payback", metrics["payback"], decisions["payback"]),
-    ]:
-        tone = status_tone(card[2]["status"])
-        st.markdown(
-            f'<div class="vt-kpi" style="margin-bottom:8px"><div class="k-label">{card[0]} — {card[2]["status"]}</div>'
-            f'<div class="k-value">{fmt_num(card[1])}</div>'
-            f'<div class="k-sub">{card[2]["reason"]}</div></div>',
-            unsafe_allow_html=True,
-        )
-
-
-def render_risk_analysis():
-    section_header(
-        "Risk Analysis",
-        "Identified risk drivers, severities, mitigations and the overall risk verdict.",
-    )
-    state = get_state()
-    risk_results = state.get("risk_results")
-    if risk_results is None:
-        empty_state("No case loaded", "Run an analysis from the sidebar first.")
-        return
-    rscore = risk_score(risk_results)
-    kpi_row(
-        [
-            ("Overall risk", f"{risk_label(rscore)}", f"{rscore}/4 composite"),
-            ("Risk drivers", str(len(risk_results["risks"])), "assessed"),
-            ("Sensitivity lead", state.get("sens_summary", {}).get("most_sensitive", "—"), "most volatile variable"),
-        ]
-    )
-    st.plotly_chart(build_risk_chart(risk_results), width="stretch")
-    st.markdown(f"**Overall assessment.** {risk_results['overall_explanation']}")
-    for r in risk_results["risks"]:
-        st.markdown(
-            f'<div class="vt-kpi" style="margin-bottom:8px"><div class="k-label">{r.risk} — {r.severity}</div>'
-            f'<div class="k-sub">Impact: {r.impact}</div>'
-            f'<div class="k-sub" style="margin-top:6px">{r.explanation}</div>'
-            f'<div class="k-sub" style="color:#BDE5FF">Mitigation: {r.mitigation}</div></div>',
-            unsafe_allow_html=True,
-        )
-
-
-def _fx_live() -> dict[str, fx.FxRate]:
-    return st.session_state.setdefault("fx_ratemap", {})
-
-
-def _refresh_fx(fetch: bool = False) -> None:
-    st.session_state.setdefault("fx_ratemap", {})
-    st.session_state.setdefault("fx_last_fetch", 0.0)
-    if fetch:
-        _run_live_fetch()
-    elif not st.session_state["fx_ratemap"]:
-        st.session_state["fx_ratemap"] = fx.all_effective_rates()
-
-
-def _run_live_fetch() -> None:
-    """Fetch live market rates from the exchange-rate providers and persist them."""
-    with st.spinner("Fetching live exchange rates..."):
-        live = fx.fetch_live_rates()
-    if live:
-        fx.store_live_rates(live)
-        st.session_state["fx_ratemap"] = live
-        st.session_state["fx_last_fetch"] = time.time()
-        st.success(f"Rates updated from {next(iter(live.values())).source}.")
+def robot_panel(bundle: AnalysisBundle | None = None):
+    st.markdown("---")
+    st.markdown('<div class="robot-box"><h4>🤖 CAPEXX AI Agent — Voice Panel</h4>',
+                unsafe_allow_html=True)
+    robot_img = ASSETS / "robot.png"
+    if robot_img.exists():
+        st.image(str(robot_img), width=70)
+    if bundle is None:
+        st.markdown(f"<p>{ROBOT_WELCOME}</p>", unsafe_allow_html=True)
+        st.markdown(f"<p><em>{ROBOT_MARKET}</em></p>", unsafe_allow_html=True)
+        if st.button("🔊 READ WELCOME ALOUD", key="robot_welcome"):
+            res = read_aloud(ROBOT_WELCOME + "\n" + ROBOT_MARKET)
+            if res["ok"]:
+                st.audio(res["path"])
+            else:
+                st.info(f"⚠️ VOICE SERVICE UNAVAILABLE — {res['error']}")
     else:
-        st.session_state["fx_ratemap"] = fx.all_effective_rates(_fx_live())
-        st.warning(
-            "Live rates unavailable (provider or network). Showing stored/override rates — "
-            "stale values are labelled, never silently used."
-        )
-
-
-def _maybe_auto_fetch_fx() -> None:
-    """Fetch live rates on open once per session (unless the user disabled it)."""
-    if not bool(st.session_state.get("fx_auto", True)):
-        return
-    if st.session_state.get("fx_auto_done"):
-        return
-    st.session_state["fx_auto_done"] = True
-    st.session_state["fx_requested"] = "refresh"
-
-
-def render_fx_multicurrency():
-    section_header(
-        "FX & Multi-Currency",
-        "USD / ZAR / ZiG across all six pairs. Live market rates are fetched automatically when "
-        "the app opens; manual overrides always win and stored rates are labelled.",
-    )
-    st.checkbox(
-        "Fetch live market rates on open",
-        value=bool(st.session_state.get("fx_auto", True)),
-        key="fx_auto",
-    )
-    _refresh_fx()
-
-    c1, c2 = st.columns([2, 1])
-    interval = c1.select_slider(
-        "Auto-refresh",
-        options=[0, 5, 10, 15, 30, 60],
-        value=int(st.session_state.get("fx_interval", 0)),
-        format_func=lambda v: "Off" if v == 0 else f"Every {v} minutes",
-    )
-    st.session_state["fx_interval"] = int(interval)
-    if c2.button("Refresh Live Rates Now", type="primary"):
-        st.session_state["fx_requested"] = "refresh"
-        st.rerun()
-
-    last = float(st.session_state.get("fx_last_fetch", 0.0))
-    if interval > 0 and last > 0 and time.time() - last >= interval * 60:
-        _refresh_fx(fetch=True)
-
-    board = fx.build_board_frame(_fx_live())
-    st.dataframe(board, width="stretch")
-    st.caption(
-        "LIVE — fresh from provider · MANUAL OVERRIDE — user-set, always wins · "
-        "STORED — last fetched, still valid · STALE — older than 24h · UNAVAILABLE — no rate."
-    )
-    with st.expander("Manual rate overrides", expanded=False):
-        pairs = [f"{a}/{b}" for a, b in fx.PAIRS]
-        pair = st.radio(
-            "Pair",
-            pairs,
-            horizontal=True,
-            key="fx_ov_pair",
-            label_visibility="collapsed",
-        )
-        rate = st.number_input(
-            f"Manual rate for {pair}", min_value=0.0000001,
-            value=float(st.session_state.get("fx_ov_val", 1.0)),
-            step=0.01, format="%.6f", key="fx_ov_rate",
-        )
-        st.session_state["fx_ov_val"] = rate
-        b1, b2 = st.columns(2)
-        if b1.button("Set override"):
-            try:
-                fx.set_manual_override(pair, float(rate))
-                _refresh_fx()
-                st.success(f"Override stored for {pair}.")
-            except Exception as exc:  # noqa: BLE001
-                st.error(str(exc))
-        if b2.button("Clear override"):
-            fx.clear_manual_override(pair)
-            _refresh_fx()
-            st.success(f"Override cleared for {pair}.")
-    with st.expander("Rate history (audit trail)", expanded=False):
-        limit = st.slider("History rows", 5, 200, 40, 5)
-        hist = fx.get_history(limit=min(limit, 200))
-        if hist:
-            st.dataframe(
-                pd.DataFrame(hist).rename(
-                    columns={"pair": "Pair", "rate": "Rate", "source": "Source",
-                             "status": "Status", "ts": "Timestamp"}
-                ),
-                width="stretch",
-            )
-        else:
-            st.info("No rate history yet. Fetch live rates to populate the audit trail.")
-
-    with st.expander("Converted exposure of the active case", expanded=False):
-        state = get_state()
-        inputs = state.get("inputs")
-        if inputs is not None:
-            ratemap = _fx_live()
-            conv, note = fx.convert_inputs_for_comparison(
-                "USD", "USD", ratemap,
-                {"initial_investment": inputs.initial_investment,
-                 "annual_revenues": inputs.annual_revenues,
-                 "operating_costs": inputs.operating_costs},
-            )
-            st.markdown(
-                f"Case currency: USD (1:1). {note}. "
-                f"See Project Comparison for full multi-currency conversion of the A/B/C cases."
-            )
-        else:
-            st.info("No active case to convert.")
-
-
-def render_scenario_analysis():
-    section_header(
-        "Scenario Analysis",
-        "Best / Base / Worst case behaviour of the investment.",
-    )
-    state = get_state()
-    scenarios = state.get("scenarios")
-    if scenarios is None:
-        empty_state("No case loaded", "Run an analysis from the sidebar first.")
-        return
-    st.plotly_chart(build_scenario_chart(scenarios), width="stretch")
-    for key in ["best", "base", "worst"]:
-        s = scenarios[key]
-        sm = s["summary"]
-        st.markdown(
-            f'<div class="vt-kpi" style="margin-bottom:10px"><div class="k-label">{s["label"]}</div>'
-            f'<div class="k-value">{fmt_money(sm["npv"])} · <span class="k-sub {status_tone(sm['decision'])}">{sm["decision"]}</span></div>'
-            f'<div class="k-sub">IRR {fmt_pct(sm["irr"])} · MIRR {fmt_pct(sm["mirr"])} · ROI {fmt_pct(sm["roi"])} · '
-            f'Payback {fmt_num(sm["payback"])} yrs · PI {fmt_num(sm["pi"])}</div>'
-            f'<div class="k-sub" style="margin-top:6px">{sm["explanation"]}</div></div>',
-            unsafe_allow_html=True,
-        )
-
-
-def render_sensitivity_analysis():
-    section_header(
-        "Sensitivity Analysis",
-        "How much the NPV moves when each key assumption swings by ±30%.",
-    )
-    state = get_state()
-    sens_df = state.get("sens_df")
-    sens_summary = state.get("sens_summary")
-    if sens_df is None:
-        empty_state("No case loaded", "Run an analysis from the sidebar first.")
-        return
-    st.plotly_chart(build_sensitivity_chart(sens_df), width="stretch")
-    st.info(sensitivity_interpretation(sens_summary))
-    st.markdown(
-        f"**Most sensitive:** {sens_summary['most_sensitive']} · "
-        f"**Least sensitive:** {sens_summary['least_sensitive']}"
-    )
-    st.dataframe(data_colored(sens_df), width="stretch")
-
-
-def render_project_comparison():
-    section_header(
-        "Project Comparison",
-        "Rank Projects A, B and C across USD / ZAR / ZiG, optimise capital allocation "
-        "(divisible or indivisible), and produce a board-ready recommendation.",
-    )
-    with st.expander("Comparison configuration", expanded=True):
-        c = st.columns(3)
-        comparison_currency = c[0].selectbox(
-            "Comparison currency", fx.CURRENCIES, index=0,
-            format_func=lambda x: _CCY[x], key="tp_cmpccy",
-        )
-        investment_type = c[1].selectbox(
-            "Investment type", ["Divisible", "Indivisible"], key="tp_invtype",
-        )
-        budget = c[2].number_input(
-            f"Investment budget ({comparison_currency})", min_value=0.0, value=0.0,
-            step=100_000.0, format="%.0f", key="tp_budget",
-        )
-        methods_sel = st.multiselect(
-            "Financial methods for ranking",
-            tp.METHODS,
-            default=["NPV", "IRR", "MIRR", "ROI", "PI", "Payback"],
-            key="tp_methods",
-        )
-        include_risk = st.checkbox("Include risk & scenario analysis in the ranking", value=True, key="tp_risk")
-
-    st.markdown("#### Project inputs (each in its own currency)")
-    _comparison_input_panel("A")
-    with st.expander("Project B — Inputs", expanded=False):
-        _comparison_input_panel("B")
-    with st.expander("Project C — Inputs", expanded=False):
-        _comparison_input_panel("C")
-
-    if st.button("Run Comparison", type="primary"):
-        if not methods_sel:
-            st.error("Select at least one financial method.")
-            return
-        ratemap = fx.all_effective_rates(_fx_live())
-        specs = {
-            letter: _tp_spec_from_widgets(letter)
-            for letter in ("A", "B", "C")
-        }
-        config = tp.ComparisonConfig(
-            projects=specs,
-            comparison_currency=comparison_currency,
-            methods=methods_sel,
-            include_risk_and_scenarios=include_risk,
-            investment_type=investment_type,
-            budget=float(budget),
-            ratemap=ratemap,
-        )
-        missing = _tp_ratemap_ready(config)
-        if missing:
-            st.error(
-                "Exchange rates unavailable for: " + ", ".join(missing)
-                + ". Set FX overrides or refresh rates first."
-            )
-            return
-        with st.spinner("Running the comparison and optimisation..."):
-            out = tp.compare_projects(config)
-        st.session_state["tp_result"] = out
-        st.session_state["tp_result_ccy"] = _CCY[comparison_currency]
-        st.success("Comparison complete.")
-
-    result = st.session_state.get("tp_result")
-    if result is not None:
-        _render_tp_result(result, st.session_state.get("tp_result_ccy", "USD"))
-
-
-def _comparison_input_panel(letter: str):
-    k = letter.lower()
-    name = st.text_input(f"Project {letter} — name", f"Project {letter}", key=f"{k}_name")
-    c1, c2 = st.columns(2)
-    with c1:
-        ccy = st.selectbox("Project currency", fx.CURRENCIES, format_func=lambda c: _CCY[c], key=f"{k}_ccy")
-        st.number_input("Initial investment", min_value=0.0, value=1_000_000.0, step=50_000.0, format="%.0f", key=f"{k}_inv")
-        st.number_input("Annual revenues", min_value=0.0, value=350_000.0, step=10_000.0, format="%.0f", key=f"{k}_rev")
-        st.number_input("Operating costs", min_value=0.0, value=80_000.0, step=10_000.0, format="%.0f", key=f"{k}_cost")
-        st.number_input("Tax rate (%)", min_value=0.0, max_value=100.0, value=25.0, step=0.5, key=f"{k}_tax")
-        st.number_input("Discount rate / WACC (%)", min_value=0.01, max_value=100.0, value=10.0, step=0.5, key=f"{k}_disc")
-    with c2:
-        st.number_input("Project life (years)", min_value=1.0, max_value=100.0, value=10.0, step=1.0, key=f"{k}_life")
-        st.number_input("Financing rate (%)", min_value=0.01, max_value=100.0, value=10.0, step=0.5, key=f"{k}_fin")
-        st.number_input("Reinvestment rate (%)", min_value=0.01, max_value=100.0, value=10.0, step=0.5, key=f"{k}_rein")
-        st.number_input("Working capital", min_value=0.0, value=0.0, step=10_000.0, format="%.0f", key=f"{k}_wc")
-        st.number_input("Terminal value", min_value=0.0, value=0.0, step=50_000.0, format="%.0f", key=f"{k}_tv")
-        st.number_input("Revenue growth (%/yr)", value=0.0, step=0.5, key=f"{k}_revg")
-    st.text_area(f"Project {letter} — description", height=60, key=f"{k}_desc")
-
-
-def _tp_spec_from_widgets(letter: str) -> tp.ProjectSpec:
-    k = letter.lower()
-    s = st.session_state
-    return tp.ProjectSpec(
-        name=str(s.get(f"{k}_name", f"Project {letter}")),
-        description=str(s.get(f"{k}_desc", "")),
-        currency=str(s[f"{k}_ccy"]),
-        initial_investment=float(s[f"{k}_inv"]),
-        annual_revenues=float(s[f"{k}_rev"]),
-        operating_costs=float(s[f"{k}_cost"]),
-        tax_rate=float(s[f"{k}_tax"]),
-        discount_rate=float(s[f"{k}_disc"]),
-        financing_rate=float(s[f"{k}_fin"]),
-        reinvestment_rate=float(s[f"{k}_rein"]),
-        project_life=float(s[f"{k}_life"]),
-        working_capital=float(s[f"{k}_wc"]),
-        terminal_value=float(s[f"{k}_tv"]),
-        revenue_growth_rate=float(s.get(f"{k}_revg", 0)),
-    )
-
-
-def _tp_ratemap_ready(config: tp.ComparisonConfig) -> list[str]:
-    missing = []
-    currencies = [p.currency for p in config.projects.values()]
-    currencies.append(config.comparison_currency)
-    for ccy in set(currencies):
-        if ccy == config.comparison_currency:
-            continue
-        direct = f"{ccy}/{config.comparison_currency}"
-        inverse = f"{config.comparison_currency}/{ccy}"
-        has_direct = config.ratemap.get(direct) is not None and config.ratemap.get(direct).rate == config.ratemap.get(direct).rate
-        has_inv = config.ratemap.get(inverse) is not None and config.ratemap.get(inverse).rate == config.ratemap.get(inverse).rate
-        ok = has_direct or has_inv
-        if ccy != "USD" and not ok:
-            via = f"{ccy}/USD"
-            vu = f"USD/{config.comparison_currency}" if config.comparison_currency != "USD" else None
-            has_via = config.ratemap.get(via) is not None and config.ratemap.get(via).rate == config.ratemap.get(via).rate
-            has_vu = vu is None or (config.ratemap.get(vu) is not None and config.ratemap.get(vu).rate == config.ratemap.get(vu).rate)
-            ok = has_via and has_vu
-        if not ok:
-            missing.append(f"{ccy} to {config.comparison_currency}")
-    return list(dict.fromkeys(missing))
-
-
-def _render_tp_result(out: dict[str, Any], ccy: str):
-    rec = out["recommendation"]
-    ranking = out["ranking_df"]
-    optimism = out["optimisation"]
-
-    st.markdown("#### Ranking")
-    st.dataframe(
-        ranking[["Rank", "Project", "Name", "Composite Score", "Risk"]], width="stretch"
-    )
-    for _, r in ranking.iterrows():
-        st.markdown(
-            f'<div class="vt-kpi" style="margin-bottom:8px"><div class="k-label">'
-            f'#{int(r["Rank"])} · Project {r["Project"]} ({r["Name"]}) · score {r["Composite Score"]:.3f} · risk {r["Risk"]}</div>'
-            f'<div class="k-sub">{rec.get(f"explanation_rank{int(r['Rank'])}", "")}</div></div>',
-            unsafe_allow_html=True,
-        )
-
-    st.markdown(f"#### Capital Optimisation — {optimism['type']}")
-    st.markdown(optimism["explanation"])
-    if optimism["type"] == "Divisible":
-        st.dataframe(optimism["allocation_df"], width="stretch")
-    else:
-        st.dataframe(optimism["combinations_df"], width="stretch")
-        st.markdown(f"**Best combination:** {optimism.get('best_combination') or 'none within budget'}")
-
-    st.markdown("#### Final Recommendation")
-    st.markdown(f"**WHAT WON:** {rec['what']}")
-    st.markdown(f"**WHY:** {rec['why']}")
-    st.markdown("**EVIDENCE**")
-    for e in rec["evidence"]:
-        st.markdown(f"- {e}")
-    st.markdown(f"**RISKS:** {rec['risks']}")
-    st.markdown(f"**WHAT MANAGEMENT SHOULD DO:** {rec['action']}")
-
-    st.markdown("#### Exchange Rates Used")
-    rate_rows = []
-    for pair, fr in out["rates"].items():
-        rate_rows.append(
-            {
-                "Currency Pair": pair,
-                "Rate Used": (None if fr.rate != fr.rate else fr.rate),
-                "Source": fr.source,
-                "Timestamp": (str(fr.ts)[:19].replace("T", " ") if fr.ts else "N/A"),
-                "Live or Manual": fr.status,
-            }
-        )
-    st.dataframe(pd.DataFrame(rate_rows), width="stretch")
-
-    st.markdown("#### Management Report & Email")
-    _tp_pdf_and_email(out)
-
-
-def _tp_pdf_and_email(out: dict[str, Any]):
-    pdf_bytes = None
-    try:
-        if not hasattr(rg, "build_three_project_pdf_report"):
-            raise AttributeError(
-                "build_three_project_pdf_report is missing from report_generator.py — "
-                "update report_generator.py on the deployment."
-            )
-        pdf_bytes = rg.build_three_project_pdf_report(out)
-    except Exception as exc:  # noqa: BLE001
-        st.error(f"Three-Project PDF generation failed: {exc}")
-
-    if pdf_bytes is not None:
-        st.download_button(
-            "Download Comparison PDF",
-            data=pdf_bytes,
-            file_name="three_project_comparison_report.pdf",
-            mime="application/pdf",
-        )
-
-    rec = out["recommendation"]
-    with st.expander("Email the comparison report", expanded=False):
-        to_email = st.text_input("Recipient email", key="tp_to")
-        subject = st.text_input("Subject", "VALTEXA — Three-Project Comparison Report", key="tp_subject")
-        body = st.text_area(
-            "Message (optional)",
-            f"{rec['what']}\n\n{rec['why']}\n\nRISKS: {rec['risks']}\n\n"
-            f"WHAT MANAGEMENT SHOULD DO: {rec['action']}",
-            height=160, key="tp_body",
-        )
-        if st.button("SEND REPORT", type="primary"):
-            _send(to_email, subject, body, [("three_project_comparison_report.pdf", pdf_bytes)] if pdf_bytes else [])
-
-
-def _send(to_email: str, subject: str, body: str, attachments: list[tuple[str, bytes]]):
-    ok, msg = email_service.send_email(
-        to_email=to_email, subject=subject, body_text=body, attachments=attachments
-    )
-    if ok:
-        st.success(msg)
-    else:
-        st.error(msg)
-
-
-def render_ai_decision():
-    section_header(
-        "AI Decision",
-        "The automated decision rationale — the recommendation first, then each piece of evidence.",
-    )
-    state = get_state()
-    final = state.get("final")
-    if final is None:
-        empty_state("No case loaded", "Run an analysis from the sidebar first.")
-        return
-    results = state["results"]
-    risk_results = state["risk_results"]
-    scenarios = state["scenarios"]
-    metrics = results["metrics"]
-
-    decision_banner(final)
-    st.markdown(f"**Recommendation.** {final['recommendation']}")
-    st.markdown("**Evidence considered**")
-    for e in final["reason"].splitlines():
-        if e.startswith("- "):
-            st.markdown(f"- {e[2:]}")
-
-    rscore = risk_score(risk_results)
-    st.markdown(f"**Risk overlay.** Overall risk is {risk_label(rscore)} ({rscore}/4). "
-                f"{risk_results['overall_explanation']}")
-
-    st.markdown("**Scenario stress**")
-    for key in ["base", "worst"]:
-        sm = scenarios[key]["summary"]
-        verdict = "value is preserved (NPV ≥ 0)" if sm["npv"] >= 0 else "value is destroyed (NPV < 0)"
-        st.markdown(f"- **{scenarios[key]['label']}:** {fmt_money(sm['npv'])} — {verdict} "
-                    f"({sm['decision']}). {sm['explanation']}")
-
-    st.markdown("**Management guidance**")
-    st.info(final["recommendation"])
-
-
-def _report_bytes(state: dict[str, Any]) -> tuple[bytes, bytes, bytes]:
-    results = state["results"]
-    scenarios = state["scenarios"]
-    sens = state["sens_summary"]
-    sens_df = state.get("sens_df", pd.DataFrame())
-    risk = state["risk_results"]
-    pdf = rg.build_pdf_report(results, scenarios, sens, risk)
-    word = rg.build_word_report(results, scenarios, sens, risk)
-    excel = _excel_bytes(results, scenarios, sens_df, risk)
-    return pdf, word, excel
-
-
-def _excel_bytes(results: dict[str, Any], scenarios: dict[str, Any], sens_df: pd.DataFrame, risk_results: dict[str, Any]) -> bytes:
-    import openpyxl
-    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-
-    wb = openpyxl.Workbook()
-    thin = Side(style="thin", color="CCCCCC")
-    border = Border(left=thin, right=thin, top=thin, bottom=thin)
-    header_fill = PatternFill("solid", fgColor="1F3A5F")
-    header_font = Font(name="Arial", color="FFFFFF", bold=True)
-    blue = Font(name="Arial", color="1F4E78")
-    black = Font(name="Arial", color="000000")
-
-    def style_sheet(ws, df, user_input_cols=None, result_idx=None):
-        for c in ws[1]:
-            c.font = header_font
-            c.fill = header_fill
-        for row in ws.iter_rows(min_row=2):
-            for c in row:
-                c.border = border
-                c.font = black
-                if isinstance(c.value, float) and c.value > 100:
-                    c.number_format = "$#,##0;($#,##0)"
-        if user_input_cols:
-            for idx, col in enumerate(df.columns, start=1):
-                if col in user_input_cols:
-                    for row in ws.iter_rows(min_row=2, min_col=idx, max_col=idx):
-                        for c in row:
-                            c.font = blue
-        if result_idx:
-            for idx, col in enumerate(df.columns, start=1):
-                if col in result_idx:
-                    for row in ws.iter_rows(min_row=2, min_col=idx, max_col=idx):
-                        for c in row:
-                            c.fill = PatternFill("solid", fgColor="D6EAF8")
-        ws.freeze_panes = "A2"
-
-    ws = wb.active
-    ws.title = "Capital Budgeting"
-    style_sheet(ws, results["cash_flow_table"], user_input_cols={"Initial Investment", "Working Capital"})
-
-    ws2 = wb.create_sheet("DCF Valuation")
-    style_sheet(ws2, results["dcf_table"], result_idx={"Present Value"})
-
-    ws3 = wb.create_sheet("Key Metrics")
-    ws3.append(["Metric", "Value"])
-    m = results["metrics"]
-    for name, val in [
-        ("Initial Investment", m["initial_investment"]), ("NPV", m["npv"]), ("IRR (%)", m["irr"]),
-        ("MIRR (%)", m["mirr"]), ("Payback (years)", m["payback"]), ("Profitability Index", m["pi"]),
-        ("ROI (%)", m["roi"]), ("Total Project Value", m["total_project_value"]),
-        ("PV of Terminal Value", m["pv_terminal"]),
-    ]:
-        ws3.append([name, val])
-    ws3["B1"].font = header_font
-
-    ws4 = wb.create_sheet("Scenarios")
-    ws4.append(["Scenario", "NPV", "IRR (%)", "MIRR (%)", "ROI (%)", "Payback", "PI", "Decision"])
-    for key, s in scenarios.items():
-        sm = s["summary"]
-        ws4.append([s["label"], sm["npv"], sm["irr"], sm["mirr"], sm["roi"], sm["payback"], sm["pi"], sm["decision"]])
-    style_sheet(ws4, pd.DataFrame([[c.value for c in row] for row in ws4.iter_rows(min_row=2)], columns=["Scenario", "NPV", "IRR (%)", "MIRR (%)", "ROI (%)", "Payback", "PI", "Decision"]))
-
-    ws5 = wb.create_sheet("Sensitivity")
-    style_sheet(ws5, sens_df)
-
-    ws6 = wb.create_sheet("Risk Analysis")
-    ws6.append(["Risk", "Severity", "Impact", "Explanation", "Mitigation"])
-    for r in risk_results["risks"]:
-        ws6.append([r.risk, r.severity, r.impact, r.explanation, r.mitigation])
-    for c in ws6[1]:
-        c.font = header_font
-        c.fill = header_fill
-    ws6.append([])
-    ws6.append(["Overall Risk Level", risk_results["overall_risk"]])
-    ws6.append(["Overall Explanation", risk_results["overall_explanation"]])
-
-    buf = io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
-    return buf.getvalue()
-
-
-def _tbl_html(df: pd.DataFrame) -> str:
-    """Render a DataFrame as a formatted HTML table for the report preview."""
-    def cell(v):
-        if pd.isna(v):
-            return ""
-        if isinstance(v, (int, float)):
-            try:
-                f = float(v)
-            except (TypeError, ValueError):
-                return str(v)
-            return f"{f:,.0f}" if abs(f) >= 1 or f == 0 else f"{f:,.2f}"
-        return str(v)
-
-    rows = [[cell(v) for v in row] for row in df.values]
-    frame = pd.DataFrame(rows, columns=[str(c) for c in df.columns])
-    return frame.to_html(index=False, border=0, classes="vt-tbl", escape=True)
-
-
-def _report_preview_html(state: dict[str, Any]) -> str:
-    """The full generated report as live HTML — exactly the document that the PDF/Word/Excel
-    downloads and the email attachment are built from."""
-    from datetime import date
-
-    results = state["results"]
-    inputs = results["inputs"]
-    metrics = results["metrics"]
-    decisions = results["decisions"]
-    final = state["final"]
-    risk_results = state["risk_results"]
-    scenarios = state["scenarios"]
-    sens_df = state.get("sens_df", pd.DataFrame())
-    today = date.today().strftime("%d %b %Y")
-
-    badge = lambda s: f'<span class="vt-badge {status_tone(s)}">{s}</span>' if s else ""
-
-    def money(v):
-        return fmt_money(v) if v is not None and np.isfinite(v) else "N/A"
-
-    def pct(v):
-        return fmt_pct(v) if v is not None and np.isfinite(v) else "N/A"
-
-    metric_rows = "".join(
-        f"<tr><td>{label}</td><td class='r'>{value}</td><td>{badge(stat)}</td></tr>"
-        for label, value, stat in [
-            ("Initial investment", money(inputs.initial_investment), ""),
-            ("Net present value", money(metrics["npv"]), decisions["npv"]["status"]),
-            ("Internal rate of return", pct(metrics["irr"]), decisions["irr"]["status"]),
-            ("Modified IRR", pct(metrics["mirr"]), decisions["mirr"]["status"]),
-            ("Return on investment", pct(metrics["roi"]), decisions["roi"]["status"]),
-            ("Profitability index", fmt_num(metrics["pi"], 3), decisions["pi"]["status"]),
-            ("Payback (years)", fmt_num(metrics["payback"]), decisions["payback"]["status"]),
-        ]
-    )
-
-    scenario_rows = "".join(
-        f"<tr><td>{s['label']}</td><td class='r'>{money(sm['npv'])}</td>"
-        f"<td class='r'>{pct(sm['irr'])}</td><td class='r'>{pct(sm['roi'])}</td>"
-        f"<td>{badge(sm['decision'])}</td><td>{sm['explanation']}</td></tr>"
-        for key, s in scenarios.items()
-        for sm in [s["summary"]]
-    )
-
-    risk_rows = "".join(
-        f"<tr><td>{r.risk}</td><td class='c'>{r.severity}</td><td>{r.explanation}</td>"
-        f"<td>{r.mitigation}</td></tr>"
-        for r in risk_results["risks"]
-    )
-
-    sens_rows = ""
-    if not sens_df.empty:
-        sf = sens_df.head(10)
-        for idx, row in sf.iterrows():
-            parts = " | ".join(f"{c}: {v}" for c, v in row.items() if pd.notna(v))
-            sens_rows += f'<tr><td class="c">{int(idx) + 1}</td><td>{parts}</td></tr>'
-
-    cash_block = f"<div class='vt-tbl-wrap'>{_tbl_html(results['cash_flow_table'])}</div>"
-    dcf_block = f"<div class='vt-tbl-wrap'>{_tbl_html(results['dcf_table'])}</div>"
-
-    return f"""
-<div class="vt-report">
-  <div class="vt-report-head">
-    <div class="vr-brand">VALTEXA<em>.</em></div>
-    <div class="vr-title">Investment Case Report</div>
-    <div class="vr-meta">{today} &middot; generated live from the case · {final["decision"]}</div>
-  </div>
-
-  <div class="vt-report-sec">1. Executive Decision</div>
-  <div class="vt-decision {status_tone(final['decision'])}">
-    <div class="d-verdict">{final["decision"]}</div>
-    <div class="d-reason">{final["reason"]}</div>
-  </div>
-  <div class="vt-report-note"><b>Recommendation.</b> {final["recommendation"]}</div>
-
-  <div class="vt-report-sec">2. Key Metrics & Verification</div>
-  <div class="vt-tbl-wrap">
-    <table class="vt-tbl"><thead><tr><th>Metric</th><th>Value</th><th>Verdict</th></tr></thead>
-    <tbody>{metric_rows}</tbody></table>
-  </div>
-
-  <div class="vt-report-sec">3. Capital Budgeting — Cash-Flow Schedule</div>
-  {cash_block}
-
-  <div class="vt-report-sec">4. DCF & Valuation — Present Value by Year</div>
-  {dcf_block}
-
-  <div class="vt-report-sec">5. Scenario Analysis</div>
-  <div class="vt-tbl-wrap">
-    <table class="vt-tbl"><thead><tr><th>Scenario</th><th>NPV</th><th>IRR</th><th>ROI</th><th>Decision</th><th>Rationale</th></tr></thead>
-    <tbody>{scenario_rows}</tbody></table>
-  </div>
-
-  <div class="vt-report-sec">6. Sensitivity (top drivers)</div>
-  <div class="vt-tbl-wrap">
-    <table class="vt-tbl"><thead><tr><th>#</th><th>Driver and its impact</th></tr></thead>
-    <tbody>{sens_rows}</tbody></table>
-  </div>
-
-  <div class="vt-report-sec">7. Risk Register</div>
-  <div class="vt-tbl-wrap">
-    <table class="vt-tbl"><thead><tr><th>Risk</th><th>Severity</th><th>Explanation</th><th>Mitigation</th></tr></thead>
-    <tbody>{risk_rows}</tbody></table>
-  </div>
-  <div class="vt-report-note"><b>Overall risk:</b> {risk_results["overall_risk"]}. {risk_results["overall_explanation"]}</div>
-
-  <div class="vt-report-sec">8. Conclusion</div>
-  <div class="vt-report-note">{final["recommendation"]}</div>
-  <div class="vt-report-foot">Prepared by VALTEXA — every figure above is computed live from the case
-  assumptions. Download the PDF / Word / Excel below for a print-ready version of this document.</div>
-</div>
-"""
-
-
-def render_reports():
-    section_header(
-        "Reports & Distribution",
-        "Export deliverables (PDF, Word, Excel) and email the report to any recipient "
-        "with one action. The sender is configured from secrets — never from the UI.",
-    )
-    state = get_state()
-    results = state.get("results")
-    if results is None:
-        empty_state("No case loaded", "Run an analysis from the sidebar first.")
-        return
-
-    st.markdown("#### Report document — full content preview")
-    st.markdown(_report_preview_html(state), unsafe_allow_html=True)
-    st.caption(
-        "This is the complete generated report, rendered live from the case. The PDF, Word and "
-        "Excel downloads below contain exactly the same content."
-    )
-
-    pdf, word, excel = _report_bytes(state)
+        narr = build_narration_text(bundle)
+        secs = section_map(bundle)
+        st.markdown(f"<p><strong>Project:</strong> "
+                    f"{bundle.project_input.project_name}</p>",
+                    unsafe_allow_html=True)
+        st.markdown(f"<p><strong>Decision:</strong> {bundle.decision.grade}</p>",
+                    unsafe_allow_html=True)
+        with st.expander("View narration script"):
+            st.code(narr)
+        if st.button("🔊 READ FINDINGS ALOUD", key="robot_read"):
+            au_path = str(OUTPUT_AU / "capexx_project_analysis.mp3")
+            res = synthesize(narr, out_path=au_path)
+            if res["ok"]:
+                st.audio(res["path"])
+            else:
+                st.info(f"⚠️ VOICE SERVICE UNAVAILABLE — {res['error']}\n\n"
+                        "The narration script is shown above.")
+        avail, msg = tts_available()
+        st.markdown(f'<small style="color:#93C5FD;">TTS status: {msg}</small>',
+                    unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+def home_page():
+    cinematic_strip()
+    market_ticker()
+    robot_panel(st.session_state.bundle)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# FORM BUILDERS
+# ═══════════════════════════════════════════════════════════════════════════════
+def _ccy_opts():
+    return SUPPORTED_CURRENCIES
+
+def _risk_opts():
+    return [0, 1, 2]
+
+def manual_input_form() -> ProjectInput | None:
+    prj = ProjectInput()
+    st.subheader("Project Details")
     c1, c2, c3 = st.columns(3)
-    c1.download_button("Download PDF Report", data=pdf, file_name="valtexa_investment_report.pdf", mime="application/pdf")
-    c2.download_button("Download Word Report", data=word, file_name="valtexa_investment_report.docx",
-                       mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-    c3.download_button("Download Excel Workbook", data=excel, file_name="valtexa_investment_analysis.xlsx",
-                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    with c1:
+        prj.project_name = st.text_input("Project name *", value="")
+        prj.organisation = st.text_input("Organisation *", value="")
+        prj.country      = st.selectbox("Country *", [""] + COUNTRY_LIST)
+        prj.location     = st.text_input("Location", value="")
+    with c2:
+        prj.project_type = st.selectbox("Project type", PROJECT_TYPES)
+        prj.description  = st.text_area("Description", value="")
+        prj.reporting_currency = st.selectbox("Reporting currency", _ccy_opts(),
+                                               index=_ccy_opts().index("USD"))
+    with c3:
+        prj.project_life          = st.number_input("Project life (years)", 1, 50, 10)
+        prj.construction_period   = st.number_input("Construction period (years)", 1, 20, 2)
+        prj.expected_delay_years  = st.number_input("Expected delay (years)", 0.0, 10.0, 0.0, 0.1)
+        prj.inflation_rate        = st.number_input("Inflation % p.a.", 0.0, 100.0, 5.0, 0.5)
+        prj.tax_rate              = st.number_input("Tax rate %", 0.0, 100.0, 25.0, 1.0)
+        prj.discount_rate         = st.number_input("Discount rate (WACC) %", 0.0, 100.0, 12.0, 0.5)
+
+    st.subheader("Capital Expenditure")
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        prj.construction_cost = st.number_input("Construction cost", 0.0, step=100_000.0, format="%.0f")
+        prj.construction_currency = st.selectbox("Currency", _ccy_opts(),
+                                                  index=_ccy_opts().index(prj.reporting_currency))
+        prj.construction_fx_pa = st.number_input("Expected FX move % p.a.", -30.0, 30.0, 0.0, 0.5)
+        prj.construction_supplier_country = st.selectbox("Supplier country", [""] + COUNTRY_LIST)
+    with c2:
+        prj.equipment_cost = st.number_input("Equipment cost", 0.0, step=100_000.0, format="%.0f")
+        prj.equipment_currency = st.selectbox("Currency##eq", _ccy_opts(),
+                                               index=_ccy_opts().index(prj.reporting_currency))
+        prj.equipment_fx_pa = st.number_input("Expected FX move % p.a.##eq", -30.0, 30.0, 0.0, 0.5)
+        prj.equipment_supplier_country = st.selectbox("Supplier country##eq", [""] + COUNTRY_LIST)
+    with c3:
+        prj.land_building_cost = st.number_input("Land & buildings cost", 0.0, step=100_000.0, format="%.0f")
+        prj.land_currency = st.selectbox("Currency##land", _ccy_opts(),
+                                          index=_ccy_opts().index(prj.reporting_currency))
+        prj.land_fx_pa = st.number_input("Expected FX move % p.a.##land", -30.0, 30.0, 0.0, 0.5)
+        prj.land_supplier_country = st.selectbox("Supplier country##land", [""] + COUNTRY_LIST)
+    with c4:
+        prj.working_capital  = st.number_input("Working capital", 0.0, step=100_000.0, format="%.0f")
+        prj.salvage_value    = st.number_input("Salvage value", 0.0, step=100_000.0, format="%.0f")
+        prj.debt_ratio       = st.number_input("Debt ratio %", 0.0, 100.0, 40.0, 1.0)
+        prj.loan_interest_rate = st.number_input("Loan interest %", 0.0, 100.0, 9.0, 0.5)
+        prj.loan_term        = st.number_input("Loan term (years)", 1, 30, 8)
+
+    st.subheader("Revenue & Operating Costs")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        prj.annual_revenue     = st.number_input("Annual revenue *", 0.0, step=100_000.0, format="%.0f")
+        prj.revenue_growth     = st.number_input("Revenue growth % p.a.", -20.0, 50.0, 3.0, 0.5)
+        prj.revenue_currency   = st.selectbox("Revenue currency", _ccy_opts(),
+                                               index=_ccy_opts().index(prj.reporting_currency))
+        prj.revenue_fx_pa      = st.number_input("Revenue FX move % p.a.", -30.0, 30.0, 0.0, 0.5)
+    with c2:
+        prj.annual_opex        = st.number_input("Annual operating costs *", 0.0, step=100_000.0, format="%.0f")
+        prj.opex_growth        = st.number_input("Opex growth % p.a.", -20.0, 50.0, 2.0, 0.5)
+        prj.opex_currency      = st.selectbox("Opex currency", _ccy_opts(),
+                                               index=_ccy_opts().index(prj.reporting_currency))
+        prj.opex_fx_pa         = st.number_input("Opex FX move % p.a.", -30.0, 30.0, 0.0, 0.5)
+    with c3:
+        prj.annual_maintenance = st.number_input("Annual maintenance", 0.0, step=10_000.0, format="%.0f")
+        prj.maintenance_currency = st.selectbox("Maint. currency", _ccy_opts(),
+                                                 index=_ccy_opts().index(prj.reporting_currency))
+        prj.maintenance_fx_pa  = st.number_input("Maint. FX move % p.a.", -30.0, 30.0, 0.0, 0.5)
+        prj.materials_supplier_country = st.selectbox("Materials supplier country", [""] + COUNTRY_LIST)
+        prj.materials_currency = st.selectbox("Materials currency", _ccy_opts(),
+                                               index=_ccy_opts().index(prj.reporting_currency))
+        prj.materials_fx_pa    = st.number_input("Materials FX move % p.a.", -30.0, 30.0, 0.0, 0.5)
+
+    st.subheader("Import / Landed-Cost %")
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    prj.import_transport_pct  = c1.number_input("Transport %", 0.0, 100.0, 0.0, 0.5)
+    prj.import_insurance_pct  = c2.number_input("Insurance %", 0.0, 100.0, 0.0, 0.5)
+    prj.import_duty_pct       = c3.number_input("Duty %", 0.0, 100.0, 0.0, 0.5)
+    prj.import_taxes_pct      = c4.number_input("Taxes %", 0.0, 100.0, 0.0, 0.5)
+    prj.conversion_cost_pct   = c5.number_input("Conversion %", 0.0, 100.0, 0.0, 0.5)
+    prj.import_financing_pct  = c6.number_input("Financing/FX %", 0.0, 100.0, 0.0, 0.5)
+
+    st.subheader("Risk Profile (0 = Low · 1 = Moderate · 2 = High)")
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    prj.market_risk         = c1.selectbox("Market", _risk_opts(), index=1)
+    prj.construction_risk   = c2.selectbox("Construction", _risk_opts(), index=1)
+    prj.operating_risk      = c3.selectbox("Operating", _risk_opts(), index=1)
+    prj.country_risk        = c4.selectbox("Country", _risk_opts(), index=1)
+    prj.currency_volatility = c5.selectbox("FX volatility", _risk_opts(), index=1)
+    prj.supplier_risk       = c6.selectbox("Supplier", _risk_opts(), index=1)
+
+    return prj
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# EXCHANGE RATE BOARD
+# ═══════════════════════════════════════════════════════════════════════════════
+def fx_board_page():
+    st.subheader("💱 Exchange Rate Board")
+    st.info("Rates below are used by the engine for multi-currency cash flows. "
+            "Rates are expressed as units of each currency per 1 USD.")
+
+    c1, c2 = st.columns([1, 3])
+    with c1:
+        use_live = st.checkbox("Attempt live fetch (public API)", value=True)
+        rep_ccy  = st.selectbox("Reporting currency", _ccy_opts(),
+                                 index=_ccy_opts().index("USD"))
+
+    live_info = None
+    if use_live:
+        with st.spinner("Fetching live rates..."):
+            live_info = try_fetch_live_rates()
+        if live_info:
+            st.session_state.fx_live_info = live_info
+            st.session_state.fx_user_rates.update(live_info["rates"])
+            st.success(f"Live rates updated · Source: {live_info['source']} · "
+                       f"{live_info['timestamp']}")
+        else:
+            st.warning("Live market data unavailable — using user-provided rates.")
+
+    board = build_exchange_rate_board(
+        st.session_state.fx_user_rates, source="LIVE / USER-PROVIDED",
+        timestamp=live_info["timestamp"] if live_info else _now_utc(),
+        reporting=rep_ccy,
+        live=live_info is not None)
+
+    if board:
+        df = pd.DataFrame(board)
+        st.dataframe(df, width="stretch", hide_index=True)
 
     st.markdown("---")
-    st.markdown("#### Email & Distribution")
-    status = email_service.sender_status()
-    if status["configured"]:
-        st.success(
-            f"Sender ready — {status['from_addr']} via {status['host']}:{status['port']} "
-            f"(login {status['username']}). Password is stored in secrets only and is never "
-            "shown here or requested in the app."
-        )
-    else:
-        st.error(
-            "Sender is NOT configured. Add an [smtp] section to .streamlit/secrets.toml "
-            "(or set SMTP_HOST / SMTP_PORT / SMTP_USERNAME / SMTP_PASSWORD / SMTP_FROM in "
-            "environment variables or Streamlit Cloud secrets) and restart the app. "
-            "You can still compose and preview the full email below — it will be sent the "
-            "moment the sender is configured."
-        )
+    st.markdown("#### Edit rates (units of currency per 1 USD)")
+    rate_cols = st.columns(6)
+    updated_rates = dict(st.session_state.fx_user_rates)
+    rate_keys = [k for k in updated_rates.keys() if k != "USD"]
+    for i, ccy in enumerate(rate_keys):
+        col = rate_cols[i % 6]
+        val = col.number_input(ccy, value=float(updated_rates.get(ccy, 1.0)),
+                                step=0.01, format="%.4f", key=f"fx_{ccy}_{rep_ccy}")
+        updated_rates[ccy] = val
+    updated_rates["USD"] = 1.0
+    st.session_state.fx_user_rates = updated_rates
 
-    c1, c2 = st.columns([2, 1])
-    to_email = c1.text_input("Recipient email", placeholder="analyst@company.com")
-    subject = c2.text_input("Subject", f"VALTEXA Investment Report — {results['inputs'].project_name}")
-    message = st.text_area(
-        "Message (optional)",
-        email_service.build_email_body(
-            results["metrics"], state["risk_results"]["overall_risk"],
-            state["final"]["decision"], state["final"]["reason"], results["inputs"].project_name,
-        ),
-        height=180,
-    )
-    attachments = [
-        ("valtexa_investment_report.pdf", pdf),
-        ("valtexa_investment_analysis.xlsx", excel),
-    ]
+    board2 = build_exchange_rate_board(updated_rates, "USER-PROVIDED",
+                                       _now_utc(), rep_ccy, live=False)
+    st.markdown("**Updated user-provided board:**")
+    st.dataframe(pd.DataFrame(board2), width="stretch", hide_index=True)
 
-    with st.expander("Email preview — complete contents of the message", expanded=False):
-        st.markdown(
-            f"""
-<div class="vt-email">
-  <div class="vt-email-row"><span class="vt-email-key">To</span>{html.escape(to_email) or "<em>not set</em>"}</div>
-  <div class="vt-email-row"><span class="vt-email-key">Subject</span>{html.escape(subject)}</div>
-  <div class="vt-email-row"><span class="vt-email-key">Attachments</span>{html.escape(", ".join(n for n, _ in attachments))}</div>
-  <pre class="vt-email-body">{html.escape(message)}</pre>
-</div>
-""",
-            unsafe_allow_html=True,
-        )
-        st.caption(
-            "This is exactly what SEND REPORT delivers to the recipient. Nothing below (To, "
-            "Subject, Message) requires a sender — the sender is only needed at delivery time."
-        )
 
-    if st.button("SEND REPORT", type="primary"):
-        ok, msg = email_service.validate_recipient(to_email)
-        if not ok:
-            st.error(msg)
-        elif not status["configured"]:
-            st.error(
-                "Not sent — the sender is not configured. Add an [smtp] section to "
-                ".streamlit/secrets.toml (or set SMTP_HOST / SMTP_PORT / SMTP_USERNAME / "
-                "SMTP_PASSWORD / SMTP_FROM in environment variables or Streamlit Cloud "
-                "secrets) and restart the app. The complete message contents are shown in "
-                "the 'Email preview' expander above and will be delivered unchanged."
-            )
-        else:
-            with st.spinner("Sending..."):
-                ok, msg = email_service.send_email(
-                    to_email=to_email, subject=subject, body_text=message,
-                    attachments=attachments,
-                )
-            if ok:
-                st.success(msg)
+# ═══════════════════════════════════════════════════════════════════════════════
+# PROJECT ANALYSIS PAGE
+# ═══════════════════════════════════════════════════════════════════════════════
+def project_analysis_page():
+    st.subheader("📊 Project Analysis")
+
+    # each data-entry tab writes its drafted project into session state so a
+    # later tab can never silently overwrite another tab's input
+    tab_manual, tab_upload, tab_demo = st.tabs([
+        "MANUAL INPUT", "UPLOAD DATA", "LOAD GZU DEMO"])
+
+    with tab_demo:
+        if st.button("🚀 LOAD GZU MASHAVA INNOVATION HUB", type="primary",
+                      width="stretch"):
+            st.session_state["_pf_demo"] = demo_project()
+            st.session_state["pf_source"] = "GZU demo"
+            st.success("Demo project loaded — select it below and Run Analysis.")
+        st.markdown(DEMO_DISCLAIMER)
+
+    with tab_upload:
+        st.markdown("Upload a CSV or Excel file matching the CAPEXX template.")
+        st.download_button("📥 Download CSV template", data=make_template_csv_bytes(),
+                           file_name="capexx_template.csv")
+        uploaded = st.file_uploader("Upload file", type=["csv", "xlsx", "pdf"],
+                                     key="pf_upload")
+        if uploaded:
+            res = parse_upload(uploaded.read(), uploaded.name)
+            if res["ok"]:
+                st.session_state["_pf_upload"] = res["input"]
+                st.session_state["pf_source"] = "Uploaded file"
+                st.success(f"File loaded: {res['input'].project_name}")
+                st.dataframe(res["table"], width="stretch", hide_index=True)
             else:
-                st.error(msg)
+                for e in res["errors"]:
+                    st.error(e)
+            for w in res.get("warnings", []):
+                st.warning(w)
+
+    with tab_manual:
+        st.session_state.setdefault("_pf_manual", ProjectInput())
+        st.session_state["_pf_manual"] = manual_input_form()
+
+    # ── choose which drafted project to analyse ──────────────────────────
+    sources: list[tuple[str, ProjectInput]] = [
+        ("Manual entry", st.session_state.get("_pf_manual", ProjectInput()))]
+    default_idx = 0
+    if st.session_state.get("_pf_upload") is not None:
+        sources.append(("Uploaded file", st.session_state["_pf_upload"]))
+        default_idx = len(sources) - 1
+    if st.session_state.get("_pf_demo") is not None:
+        sources.append(("GZU demo", st.session_state["_pf_demo"]))
+        default_idx = len(sources) - 1
+    src_labels = [s[0] for s in sources]
+    if "pf_source" not in st.session_state or \
+            st.session_state.get("pf_source") not in src_labels:
+        st.session_state["pf_source"] = src_labels[default_idx]
+    src_label = st.radio("Project source", src_labels, horizontal=True,
+                         key="pf_source")
+    prj = next(s[1] for s in sources if s[0] == src_label)
+
+    # ── RUN ANALYSIS ─────────────────────────────────────────────────────
+    st.markdown("---")
+
+    prj.fx_rates = dict(st.session_state.fx_user_rates)
+    prj.fx_rate_source = ("LIVE" if st.session_state.fx_live_info
+                          else "USER-PROVIDED / DEMONSTRATION")
+    if st.session_state.fx_live_info:
+        prj.fx_rate_timestamp = st.session_state.fx_live_info["timestamp"]
+
+    errs = prj.validation_errors()
+    if errs:
+        for e in errs:
+            st.error(e)
+        return
+
+    if st.button("🚀 RUN ANALYSIS", type="primary", width="stretch",
+                  key="run_analysis"):
+        steps = [
+            "Building cash-flow model…", "Computing NPV / IRR / MIRR…",
+            "Running sensitivity analysis…", "Running scenario engine…",
+            "Running stress tests…", "Aggregating FX exposure…",
+            "Generating currency strategy…", "Running risk engine…",
+            "Running decision engine…", "Building AI interpretation…",
+            "Generating narration script…", "Analyse complete ✓"]
+        prog = st.progress(0, text=steps[0])
+        for i, step in enumerate(steps):
+            time.sleep(0.18)
+            prog.progress((i + 1) / len(steps), text=step)
+        bundle = run_analysis(prj)
+        st.session_state.bundle = bundle
+        prog.empty()
+
+    bundle: AnalysisBundle | None = st.session_state.bundle
+    if bundle is None or bundle.project_input.project_name != prj.project_name:
+        st.info("Click RUN ANALYSIS to evaluate this project.")
+        return
+
+    p  = bundle.project_input
+    m  = bundle.metrics
+    fx = bundle.fx
+
+    # ── Status-light overlay ─────────────────────────────────────────────
+    status_light_overlay(bundle.decision.status)
+
+    # ── Top KPI row ──────────────────────────────────────────────────────
+    st.markdown("### Key Results")
+    k1, k2, k3, k4, k5, k6 = st.columns(6)
+    k1.metric("NPV", fmt_ccy(m.npv, p.reporting_currency),
+              f"WACC {m.wacc:.1f}%")
+    k2.metric("IRR", fmt_pct(m.irr))
+    k3.metric("MIRR", fmt_pct(m.mirr))
+    k4.metric("Payback", f"{m.payback:.1f} y" if m.payback else "n/a",
+              f"Discounted {m.discounted_payback:.1f} y" if m.discounted_payback else "")
+    k5.metric("Profitability Index", f"{m.pi:.2f}" if m.pi else "n/a")
+    k6.metric("Risk", bundle.risk.level,
+              f"Score {bundle.risk.score:.0f}/100")
+
+    # ── Decision banner + 10s overlay already above ──────────────────────
+    decision_banner(bundle.decision.status, bundle.decision.score,
+                    bundle.decision.grade, bundle.decision.reasons)
+
+    # ── Metric formula/result/interpretation table ───────────────────────
+    with st.expander("Full metrics — formula → result → interpretation", expanded=True):
+        metric_rows = [
+            ("NPV", f"Σ FCFt/(1+r)^t − C0",
+             fmt_ccy(m.npv, p.reporting_currency),
+             "Positive NPV means value created above the required return."),
+            ("IRR", "Rate that makes NPV = 0",
+             fmt_pct(m.irr),
+             f"{'Above' if (m.irr or 0)>=m.wacc else 'Below'} WACC ({m.wacc:.1f}%)."),
+            ("MIRR", "Finance rate + reinvestment rate",
+             fmt_pct(m.mirr),
+             "Single unambiguous return metric."),
+            ("Payback", "Year cumulative FCF turns positive",
+             f"{m.payback:.1f} y" if m.payback else "n/a",
+             f"{'Within' if m.payback and m.payback<=p.project_life*0.5 else 'Outside'} half the project life."),
+            ("PI", "PV inflows / PV outflows",
+             f"{m.pi:.2f}" if m.pi else "n/a",
+             "PI > 1.0 signals value creation per unit invested."),
+            ("ARR", "Avg profit / avg investment",
+             fmt_pct(m.arr) if m.arr else "n/a",
+             "Accounting-based return check."),
+            ("EAA", "NPV / annuity factor",
+             fmt_ccy(m.eaa, p.reporting_currency) if m.eaa else "n/a",
+             "Annualised value across the operating life."),
+            ("Break-even", "Revenue multiplier driving NPV to 0",
+             f"{m.break_even_multiplier:.2f}x" if m.break_even_multiplier is not None else "n/a",
+             "Revenue must stay above this multiple of the base case."),
+        ]
+        st.dataframe(pd.DataFrame(metric_rows, columns=["Metric", "Formula", "Result", "Interpretation"]),
+                      width="stretch", hide_index=True)
+
+    # ── Cash flow table & charts ─────────────────────────────────────────
+    with st.expander("Cash-flow schedule and charts"):
+        cf_df = bundle.model.to_dataframe()
+        st.dataframe(cf_df.style.format("{:,.0f}", subset=cf_df.columns[2:]),
+                      width="stretch", hide_index=True)
+        fig = go.Figure()
+        fig.add_trace(go.Bar(x=cf_df["Year"], y=cf_df["Revenue"], name="Revenue",
+                             marker_color="#22c55e"))
+        fig.add_trace(go.Bar(x=cf_df["Year"], y=cf_df["Operating Costs"], name="Opex",
+                             marker_color="#ef4444"))
+        fig.add_trace(go.Bar(x=cf_df["Year"], y=cf_df["Maintenance"], name="Maintenance",
+                             marker_color="#f59e0b"))
+        fig.add_trace(go.Scatter(x=cf_df["Year"], y=cf_df["Free Cash Flow"], name="FCF",
+                                 mode="lines+markers", line=dict(color="#1547A0", width=3)))
+        fig.update_layout(barmode="group", title="Revenue / Costs / FCF by Year",
+                          xaxis_title="Year", yaxis_title="Amount",
+                          template="plotly_white")
+        st.plotly_chart(fig, width="stretch")
+
+        fig2 = go.Figure()
+        fig2.add_trace(go.Scatter(x=cf_df["Year"], y=cf_df["Cumulative FCF"],
+                                  name="Cumulative FCF", fill="tozeroy",
+                                  line=dict(color="#1547A0")))
+        fig2.add_trace(go.Scatter(x=cf_df["Year"], y=cf_df["Cumulative Disc. FCF"],
+                                  name="Cumulative Discounted FCF", fill="tozeroy",
+                                  line=dict(color="#93C5FD")))
+        fig2.update_layout(title="Cumulative Cash Flows", template="plotly_white")
+        st.plotly_chart(fig2, width="stretch")
+
+    # ── Risk radar ───────────────────────────────────────────────────────
+    with st.expander("Risk analysis"):
+        rd = bundle.risk
+        categories = (["Cost", "Delay", "Revenue", "Opex", "Inflation",
+                        "FX", "Interest", "Cash-flow", "Completion", "Supplier"])
+        values = [rd.cost_risk, rd.delay_risk, rd.revenue_risk, rd.opex_risk,
+                  rd.inflation_risk, rd.fx_risk, rd.interest_rate_risk,
+                  rd.cashflow_risk, rd.completion_risk, rd.supplier_risk]
+        fig_r = go.Figure(go.Scatterpolar(
+            r=values + [values[0]], theta=categories + [categories[0]],
+            fill="toself", line_color="#1547A0", opacity=0.75))
+        fig_r.update_layout(title=f"Risk Radar — Overall {rd.level} ({rd.score:.0f}/100)",
+                            template="plotly_white", polar=dict(radialaxis=dict(range=[0, 100])))
+        st.plotly_chart(fig_r, width="stretch")
+        for d in rd.detail:
+            st.markdown(f"• {d}")
+
+    # ── FX / Currency ────────────────────────────────────────────────────
+    with st.expander("Currency / FX analysis"):
+        st.markdown(f"**FX risk level:** {fx['fx_risk_level']} · "
+                    f"Score {fx['fx_risk_score']:.0f}/100 · "
+                    f"{fx['mismatch_count']} mismatched stream(s)")
+        if fx["exposures"]:
+            st.dataframe(pd.DataFrame(fx["exposures"]),
+                          width="stretch", hide_index=True)
+        for n in fx["hedging_notes"]:
+            st.markdown(f"• {n}")
+        st.markdown("**Transaction-level currency strategy:**")
+        for x in bundle.fx_strategy:
+            st.markdown(f"**{x['transaction']}** — invoice {x['invoice_currency']} "
+                        f"(supplier: {x['supplier_country'] or 'n/a'})")
+            st.markdown(f"  *Analysis:* {x['analysis']}")
+            st.markdown(f"  *Recommendation:* {x['recommendation']}")
+
+        if bundle.landed_cost:
+            st.markdown("**Landed-cost build-up (imported equipment):**")
+            lc = bundle.landed_cost
+            st.dataframe(pd.DataFrame([lc]).T.rename(columns={0: "Amount"}).style.format("{:,.0f}"),
+                          width="stretch")
+
+    # ── Scenarios ────────────────────────────────────────────────────────
+    with st.expander("Scenario analysis"):
+        sc = bundle.scenarios
+        for name, data in sc.items():
+            tag = "🟢" if data["npv"] > 0 else "🔴"
+            st.markdown(f"{tag} **{name}** — NPV {fmt_ccy(data['npv'], p.reporting_currency)} "
+                        f"· IRR {fmt_pct(data['irr'])} · {data['description']}")
+        fig_sc = go.Figure(go.Bar(
+            x=list(sc.keys()), y=[d["npv"] for d in sc.values()],
+            marker_color=["#22c55e" if d["npv"] > 0 else "#ef4444" for d in sc.values()]))
+        fig_sc.update_layout(title="Scenario NPVs", yaxis_title=f"NPV ({p.reporting_currency})",
+                             template="plotly_white")
+        st.plotly_chart(fig_sc, width="stretch")
+
+    # ── Stress tests ─────────────────────────────────────────────────────
+    with st.expander("Stress testing"):
+        st.dataframe(pd.DataFrame(bundle.stress).rename(columns={
+            "impact": "NPV impact", "impact_pct": "Impact %"}),
+            width="stretch", hide_index=True)
+        fig_st = go.Figure(go.Bar(
+            x=[s["name"] for s in bundle.stress],
+            y=[s["impact"] for s in bundle.stress],
+            marker_color=["#22c55e" if s["impact"] >= 0 else "#ef4444" for s in bundle.stress]))
+        fig_st.update_layout(title="Stress NPV Impact vs Base",
+                             yaxis_title=f"NPV Change ({p.reporting_currency})",
+                             template="plotly_white")
+        st.plotly_chart(fig_st, width="stretch")
+
+    # ── Sensitivity ──────────────────────────────────────────────────────
+    with st.expander("Sensitivity (tornado)"):
+        for s in bundle.sensitivity:
+            st.markdown(f"**{s['driver']}** — low NPV {fmt_ccy(s['npv_low'], p.reporting_currency)} "
+                        f"/ high NPV {fmt_ccy(s['npv_high'], p.reporting_currency)} "
+                        f"/ delta {fmt_ccy(s['delta'], p.reporting_currency)}")
+
+    # ── AI Interpretation ────────────────────────────────────────────────
+    with st.expander("AI Interpretation — WHAT / WHY / SO WHAT / WHAT IF / MONITOR"):
+        interp = generate_ai_interpretation(bundle)
+        st.markdown(interp)
+        if st.button("Why did CAPEXX reach this result?"):
+            st.markdown(why_did_capexx_text(bundle))
+
+    # ── Robot voice panel (post-analysis) ────────────────────────────────
+    robot_panel(bundle)
+
+    # ── Download report ──────────────────────────────────────────────────
+    from capexx_engine import build_report_markdown, build_email
+    md_report = build_report_markdown(bundle)
+    rpt_path = OUTPUT_RPT / f"{p.project_name.replace(' ','_')}_CAPEXX_Report.md"
+    rpt_path.write_text(md_report, encoding="utf-8")
+    st.download_button("📥 Download Report (Markdown)", data=md_report,
+                        file_name=rpt_path.name, mime="text/markdown")
+    csv_buf = io.StringIO()
+    bundle.model.to_dataframe().to_csv(csv_buf, index=False)
+    st.download_button("📥 Download Cash Flows (CSV)", data=csv_buf.getvalue(),
+                        file_name=f"{p.project_name.replace(' ','_')}_cashflows.csv",
+                        mime="text/csv")
 
 
-def render_settings():
-    section_header(
-        "Settings",
-        "Platform configuration, sender status and deployment notes. Sensitive values are "
-        "never displayed or requested — they live in secrets only.",
-    )
-    st.markdown("#### Sender (SMTP / API) configuration")
-    status = email_service.sender_status()
-    st.dataframe(
-        pd.DataFrame(
-            {
-                "Setting": ["Configured", "Host", "Port", "Login (username)", "Password", "From address", "Source"],
-                "Value": [
-                    "Yes" if status["configured"] else "No",
-                    status["host"], status["port"], status["username"],
-                    status["password"] or "not set", status["from_addr"], status["source"],
-                ],
-            }
-        ),
-        width="stretch", height=200,
-    )
-    st.caption(
-        "To change the sender: edit .streamlit/secrets.toml (local) or the Secrets tab "
-        "(Streamlit Cloud). Restart the app afterwards. Passwords are read into memory only."
-    )
-    if status["configured"] and st.button("Test sender connection (no email is sent)"):
-        ok, msg = email_service.test_connection()
-        if ok:
-            st.success(msg)
-        else:
-            st.error(msg)
+def make_template_csv_bytes() -> bytes:
+    from capexx_engine import make_template_csv
+    return make_template_csv().encode("utf-8")
 
-    st.markdown("#### Case data")
-    state = get_state()
-    if state.get("results") is not None:
-        st.markdown(
-            f"Active case: **{state['inputs'].project_name}** ({state['final']['decision']}). "
-            "Clear it from the sidebar to start over."
-        )
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PORTFOLIO PAGE
+# ═══════════════════════════════════════════════════════════════════════════════
+def portfolio_page():
+    st.subheader("📁 Portfolio — Compare Projects")
+    st.info("Add projects to the portfolio for side-by-side comparison. "
+            "CAPEXX does not rank or recommend between projects.")
+
+    bundle = st.session_state.bundle
+    if bundle:
+        if st.button("➕ Add current project to portfolio"):
+            existing = [b.project_input.project_name for b in st.session_state.portfolio]
+            if bundle.project_input.project_name not in existing:
+                st.session_state.portfolio.append(bundle)
+                st.success(f"Added: {bundle.project_input.project_name}")
+            else:
+                st.info("Already in portfolio.")
     else:
-        st.markdown("No active case.")
+        st.info("Run a project analysis first to add it to the portfolio.")
 
-    st.markdown("#### Platform")
+    if not st.session_state.portfolio:
+        st.info("No projects in portfolio.")
+        return
+
+    rows = []
+    for b in st.session_state.portfolio:
+        p_ = b.project_input; m_ = b.metrics
+        rows.append({
+            "Project": p_.project_name,
+            "Country": p_.country,
+            "Type": p_.project_type,
+            "NPV": f"{m_.npv:,.0f}",
+            "IRR": fmt_pct(m_.irr),
+            "MIRR": fmt_pct(m_.mirr),
+            "Payback": f"{m_.payback:.1f}y" if m_.payback else "n/a",
+            "Risk": b.risk.level,
+            "Decision": b.decision.status,
+        })
+    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+
+    st.markdown("#### Capital allocation illustration")
+    names  = [r["Project"] for r in rows]
+    npvs   = [float(r["NPV"].replace(",","")) for r in rows]
+    fig = go.Figure(go.Pie(labels=names, values=[abs(v) for v in npvs],
+                            hole=0.45,
+                            marker=dict(colors=["#1547A0", "#3B82F6", "#93C5FD",
+                                                 "#22c55e", "#f59e0b", "#ef4444"])))
+    fig.update_layout(title="Relative project NPV sizes (illustrative, not a ranking)",
+                      template="plotly_white")
+    st.plotly_chart(fig, width="stretch")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMPARE & SELECT PAGE  (side-by-side · scorecard · budget · A/B what-if)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+VARIANT_PRESETS = {
+    "Capital cost +30%":      lambda p: (_scale(p, ["construction_cost",
+                            "equipment_cost", "land_building_cost"], 1.3),
+                            "Capital cost raised 30% (overrun stress)."),
+    "Revenue −20%":           lambda p: (setattr(p, "annual_revenue",
+                            p.annual_revenue * 0.8), "Demand shock: revenue −20%."),
+    "Operating costs +20%":   lambda p: (_scale(p, ["annual_opex",
+                            "annual_maintenance"], 1.2),
+                            "Opex and maintenance raised 20%."),
+    "WACC +3 percentage points": lambda p: (setattr(p, "discount_rate",
+                            min(100.0, p.discount_rate + 3)),
+                            "Discount rate raised by 3 pp."),
+    "Construction delay +1 year": lambda p: (setattr(p, "expected_delay_years",
+                            p.expected_delay_years + 1),
+                            "Expected completion delay of +1 year."),
+    "Revenue growth +5pp":    lambda p: (setattr(p, "revenue_growth",
+                            p.revenue_growth + 5),
+                            "Annual revenue growth raised 5 pp."),
+    "FX depreciation −15%":   lambda p: (_fx_shock(p, 0.15),
+                            "Non-reporting-currency cash flows weaken 15% "
+                            "against the reporting currency."),
+}
+VARIANT_LABELS = list(VARIANT_PRESETS.keys())
+
+
+def _scale(p: ProjectInput, fields: list[str], factor: float) -> None:
+    for f in fields:
+        setattr(p, f, getattr(p, f) * factor)
+
+
+def _fx_shock(p: ProjectInput, shock: float) -> None:
+    """Scale down non-reporting-currency cash flows by `shock` (FX shock)."""
+    for f in ("annual_revenue", "annual_opex", "annual_maintenance",
+              "construction_cost", "equipment_cost", "land_building_cost"):
+        cur = getattr(p, f.replace("cost", "currency") if f.endswith("cost")
+                      else f + "_currency", p.reporting_currency)
+        if cur != p.reporting_currency:
+            setattr(p, f, getattr(p, f) * (1.0 - shock))
+    p.currency_volatility = min(5, p.currency_volatility + 1)
+
+
+def _variant_project(p: ProjectInput, preset: str) -> tuple[ProjectInput, str]:
+    p2 = copy.deepcopy(p)
+    note = VARIANT_PRESETS[preset](p2)[1]
+    p2.project_name = f"{p.project_name}  [{preset}]"
+    return p2, note
+
+
+def _available_bundles() -> list[AnalysisBundle]:
+    """All analyses available to Compare: current + portfolio + compare store."""
+    seen: dict[str, AnalysisBundle] = {}
+    for b in list(st.session_state.compare_analyses.values()):
+        seen[b.project_input.project_name] = b
+    for b in st.session_state.portfolio:
+        seen[b.project_input.project_name] = b
+    b = st.session_state.bundle
+    if b:
+        seen[b.project_input.project_name] = b
+    return list(seen.values())
+
+
+def _ensure_analysis(prj: ProjectInput) -> AnalysisBundle:
+    pname = prj.project_name
+    if pname in st.session_state.compare_analyses:
+        return st.session_state.compare_analyses[pname]
+    b = run_analysis(prj)
+    st.session_state.compare_analyses[pname] = b
+    return b
+
+
+def _compare_sidebar() -> None:
+    with st.sidebar:
+        st.divider()
+        st.caption("⚖️ Compare sources")
+        if st.button("➕ Add current analysis", width="stretch"):
+            if st.session_state.bundle:
+                _ensure_analysis(st.session_state.bundle.project_input)
+                st.toast("Current analysis added to Compare")
+            else:
+                st.toast("No current analysis — run one on Project Analysis")
+        if st.button("🏫 Add GZU demo project", width="stretch"):
+            _ensure_analysis(demo_project())
+            st.toast("GZU demo added to Compare")
+        if st.button("🌍 Add sample portfolio (5 projects)", width="stretch"):
+            for prj in sample_portfolio_projects():
+                _ensure_analysis(prj)
+            st.toast("5 sample projects added")
+
+
+def _show_comparison_metrics(bundles: list[AnalysisBundle]) -> None:
+    m_rows = {
+        "Reporting currency": [b.project_input.reporting_currency for b in bundles],
+        "Country":            [b.project_input.country for b in bundles],
+        "Project type":       [b.project_input.project_type for b in bundles],
+        "Life (years)":       [str(b.project_input.project_life) for b in bundles],
+        "NPV":                [fmt_ccy(b.metrics.npv, b.project_input.reporting_currency) for b in bundles],
+        "IRR":                [fmt_pct(b.metrics.irr) for b in bundles],
+        "MIRR":               [fmt_pct(b.metrics.mirr) for b in bundles],
+        "Payback (years)":    [f"{b.metrics.payback:.1f}" if b.metrics.payback else "n/a" for b in bundles],
+        "PI (Profitability)": [f"{b.metrics.pi:.2f}" if b.metrics.pi else "n/a" for b in bundles],
+        "EAA":                [fmt_ccy(b.metrics.eaa, b.project_input.reporting_currency) for b in bundles],
+        "Total investment":   [fmt_ccy(b.metrics.total_investment, b.project_input.reporting_currency) for b in bundles],
+        "Risk score":         [f"{b.risk.score:.0f}/100" for b in bundles],
+        "FX mismatches":      [f"{b.fx['mismatch_count']}" for b in bundles],
+        "Decision score":     [f"{b.decision.score:.0f}/100" for b in bundles],
+    }
+    df = pd.DataFrame(m_rows, index=[b.project_input.project_name for b in bundles]).T
+    st.dataframe(df, width="stretch")
+
+
+def _show_radar_overlay(bundles: list[AnalysisBundle]) -> None:
+    categories = (["Cost", "Delay", "Revenue", "Opex", "Inflation", "FX",
+                   "Interest", "Cash-flow", "Completion", "Supplier"])
+    colors = ["#1547A0", "#f59e0b", "#22c55e", "#ef4444", "#8b5cf6", "#06b6d4"]
+    fig = go.Figure()
+    for i, b in enumerate(bundles):
+        rd = b.risk
+        values = [rd.cost_risk, rd.delay_risk, rd.revenue_risk, rd.opex_risk,
+                  rd.inflation_risk, rd.fx_risk, rd.interest_rate_risk,
+                  rd.cashflow_risk, rd.completion_risk, rd.supplier_risk]
+        fig.add_trace(go.Scatterpolar(
+            r=values + [values[0]], theta=categories + [categories[0]],
+            fill="toself", name=b.project_input.project_name,
+            line_color=colors[i % len(colors)], opacity=0.45))
+    fig.update_layout(title="Risk radar overlay (higher = higher risk)",
+                      template="plotly_white",
+                      polar=dict(radialaxis=dict(range=[0, 100])))
+    st.plotly_chart(fig, width="stretch")
+
+
+def compare_page():
+    st.subheader("⚖️ Compare & Select — choose what to fund")
     st.markdown(
-        """
-- **Engines**: `calculations.py`, `risk_analysis.py`, `scenario_analysis.py`, `fx_rates.py`,
-  `three_project.py`, `report_generator.py`, `email_service.py`, `data_validation.py`.
-- Every figure in VALTEXA is computed live from the case inputs — nothing is pre-computed or hard-coded.
-- Reports are produced as PDF, Word and Excel and can be emailed to any valid recipient.
-- The sender is configured only through `.streamlit/secrets.toml` or `SMTP_*` environment/secrets
-  variables. The user never supplies the sender password and credentials are never exposed.
-"""
-    )
-    with st.expander("How to configure the sender"):
+        "Decision-support for banks, government and DFIs: rank candidate "
+        "projects objectively, select the best set within a capital budget, "
+        "and stress one project against a what-if variant. **Nothing here is "
+        "financial advice** — final governance decisions remain with the "
+        "human decision-maker.")
+    _compare_sidebar()
+
+    tab_note, tab_sbs, tab_score, tab_budget, tab_ab = st.tabs(
+        ["ℹ️ How to use", "⬅️➡️ Side-by-side", "🎯 Funding scorecard",
+         "💵 Budget selection", "🅰️🅱️ A/B what-if"])
+
+    with tab_note:
+        st.markdown("""
+**What each tab does**
+
+| Tab | Use it when… |
+|---|---|
+| **Side-by-side** | You want 2+ projects compared line-by-line (NPV, IRR, risk radar, FX). |
+| **Funding scorecard** | 20+ proposals and you need an objective priority order ("which 10 of 20 do we fund first"). |
+| **Budget selection** | You have a fixed capital ceiling (e.g. $100M or $500M) and want the best set that fits it. |
+| **A/B what-if** | You want to see one project under a different assumption (costs +30%, revenue −20%, delay, FX shock…). |
+
+**Where do projects come from?** Run analyses on **Project Analysis** (portfolio adds them),
+or click the *Compare sources* buttons in the sidebar to batch-load the GZU demo and the
+5-country sample portfolio.
+""")
+
+    bundles = _available_bundles()
+    names = [b.project_input.project_name for b in bundles]
+
+    # ── Side-by-side ───────────────────────────────────────────────────────
+    with tab_sbs:
+        if not bundles:
+            st.info("No analyses yet. Run a project on Project Analysis, or add "
+                    "demo/sample projects from the sidebar 'Compare sources'.")
+        else:
+            sel = st.multiselect("Projects to compare", names, default=names,
+                                 key="cmp_sbs_sel")
+            chosen = [b for b in bundles if b.project_input.project_name in sel]
+            if chosen:
+                st.markdown("#### Decision banners")
+                cols = st.columns(len(chosen))
+                for col, b in zip(cols, chosen):
+                    with col:
+                        st.markdown(f"**{b.project_input.project_name}**")
+                        metric_card(b.decision.status, f"{b.decision.score:.0f}/100",
+                                    f"{b.decision.grade} · {b.risk.level} risk")
+                st.markdown("#### Metrics")
+                _show_comparison_metrics(chosen)
+                st.markdown("#### Risk radar overlay")
+                _show_radar_overlay(chosen)
+                with st.expander("Currency / FX exposure by project"):
+                    for b in chosen:
+                        st.markdown(f"**{b.project_input.project_name}** — "
+                                    f"{b.fx['fx_risk_level']} "
+                                    f"({b.fx['fx_risk_score']:.0f}/100, "
+                                    f"{b.fx['mismatch_count']} mismatches)")
+                        if b.fx["exposures"]:
+                            st.dataframe(pd.DataFrame(b.fx["exposures"]),
+                                         width="stretch", hide_index=True)
+                with st.expander("Scenario comparison"):
+                    sc_rows = {}
+                    for b in chosen:
+                        sc_rows[b.project_input.project_name] = {
+                            "Base":        fmt_ccy(b.scenarios["BASE CASE"]["npv"],
+                                                   b.project_input.reporting_currency),
+                            "Optimistic":  fmt_ccy(b.scenarios["OPTIMISTIC"]["npv"],
+                                                   b.project_input.reporting_currency),
+                            "Pessimistic": fmt_ccy(b.scenarios["PESSIMISTIC"]["npv"],
+                                                   b.project_input.reporting_currency),
+                        }
+                    st.dataframe(pd.DataFrame(sc_rows).T, width="stretch")
+
+    # ── Funding scorecard ──────────────────────────────────────────────────
+    with tab_score:
         st.markdown(
-            """
-Create or edit `.streamlit/secrets.toml` in the project folder:
+            "Objective **funding-priority score (0–100)** = 40 points value "
+            "(NPV/PI) + 30 risk + 15 resilience + 15 Vision-2030 alignment. "
+            "Use it to *justify* a capital plan, never to replace governance.")
+        if not bundles:
+            st.info("No projects available to score.")
+        else:
+            vision = st.slider("Vision 2030 alignment weight input (0–10)",
+                               0.0, 10.0, 7.0, 0.5, key="cmp_vision")
+            sel2 = st.multiselect("Projects to score", names, default=names,
+                                  key="cmp_score_sel")
+            wanted = [b for b in bundles if b.project_input.project_name in sel2]
+            if wanted:
+                rows = []
+                for b in wanted:
+                    f = funding_priority(b, vision_score=vision)
+                    rows.append({
+                        "Rank": 0, "Project": f["project_name"],
+                        "Score": f["score"], "Grade": f["grade"],
+                        "Value (40)": f["components"]["value"],
+                        "Risk (30)": f["components"]["risk"],
+                        "Resilience (15)": f["components"]["resilience"],
+                        "Vision (15)": f["components"]["vision"],
+                        "NPV": fmt_ccy(f["npv"], f["reporting_currency"]),
+                        "Investment": fmt_ccy(f["investment"], f["reporting_currency"]),
+                        "Decision": f["decision"],
+                    })
+                rows.sort(key=lambda r: r["Score"], reverse=True)
+                for i, r in enumerate(rows, start=1):
+                    r["Rank"] = i
+                st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+                st.markdown("#### First-fund / defer / avoid")
+                st.markdown("• **High priority (≥75):** shortlist for funding.")
+                st.markdown("• **Moderate (50–74):** fund only with the flagged "
+                            "conditions met.")
+                st.markdown("• **Low (<50):** defer or drop unless a strategic "
+                            "override applies.")
+                with st.expander("Automatic conditions & flags"):
+                    for b in wanted:
+                        f = funding_priority(b, vision_score=vision)
+                        st.markdown(f"**{f['project_name']}** "
+                                    f"({f['grade']}, {f['score']})")
+                        for flag in f["flags"]:
+                            st.markdown(f"• {flag}")
 
-```toml
-[smtp]
-host = "smtp.gmail.com"
-port = "587"
-username = "sender@yourdomain.com"
-password = "app-password-or-token"
-from_addr = "VALTEXA <sender@yourdomain.com>"
-```
+    # ── Budget selection ───────────────────────────────────────────────────
+    with tab_budget:
+        st.markdown(
+            "Enter a capital budget and CAPEXX uses a knapsack optimisation "
+            "to pick the **highest total priority-score set that fits**.")
+        if not bundles:
+            st.info("No projects available to budget-select.")
+        else:
+            sel3 = st.multiselect("Candidate projects", names, default=names,
+                                  key="cmp_budget_sel")
+            cands = [b for b in bundles if b.project_input.project_name in sel3]
+            if cands:
+                vision_b = st.slider("Vision 2030 alignment input (budget tab)",
+                                     0.0, 10.0, 7.0, 0.5, key="cmp_budget_vision")
+                total = sum(b.metrics.total_investment for b in cands)
+                budget = st.number_input(
+                    "Capital budget (reporting currency of each project)",
+                    min_value=1.0, value=max(1.0, total),
+                    step=100000.0, key="cmp_budget_amt")
+                force_in = st.multiselect("Force-include (even if over budget)",
+                                          [b.project_input.project_name for b in cands],
+                                          key="cmp_budget_force")
+                if st.button("💵 Run budget selection", key="cmp_budget_run"):
+                    costs = [b.metrics.total_investment for b in cands]
+                    vals = [funding_priority(b, vision_score=vision_b)["score"]
+                            for b in cands]
+                    forced_names = set(force_in)
+                    forced_cost = sum(b.metrics.total_investment for b in cands
+                                      if b.project_input.project_name in forced_names)
+                    remainder = budget - forced_cost
+                    nf_indices = [i for i, b in enumerate(cands)
+                                  if b.project_input.project_name not in forced_names]
+                    picked: set[int] = set()
+                    if remainder > 0 and nf_indices:
+                        res = knapsack_select([costs[i] for i in nf_indices],
+                                              [vals[i] for i in nf_indices],
+                                              remainder)
+                        picked = {nf_indices[pos] for pos in res["selected"]}
+                    else:
+                        res = {"unspent": max(0.0, remainder), "total_cost": 0.0,
+                               "total_value": 0.0}
+                    selected, deferred = [], []
+                    for j, b in enumerate(cands):
+                        if b.project_input.project_name in forced_names:
+                            selected.append((j, b, "forced"))
+                        elif j in picked:
+                            selected.append((j, b, "optimised"))
+                        else:
+                            deferred.append((j, b))
+                    s_rows = [{
+                        "Project": b.project_input.project_name,
+                        "Investment": fmt_ccy(b.metrics.total_investment,
+                                              b.project_input.reporting_currency),
+                        "Priority": vals[j],
+                        "Basis": "forced" if basis == "forced" else "optimised",
+                    } for j, b, basis in sorted(selected,
+                                                key=lambda t: -vals[t[0]])]
+                    total_used = sum(b.metrics.total_investment
+                                     for _, b, _ in selected)
+                    if forced_cost > budget:
+                        st.warning(f"Forced projects alone need "
+                                   f"{forced_cost:,.0f}, which exceeds "
+                                   f"the budget {budget:,.0f}.")
+                    st.success(
+                        f"**Selected {len(selected)} of {len(cands)} "
+                        f"projects.** Total required **{total_used:,.0f}** "
+                        f"within budget **{budget:,.0f}** — surplus "
+                        f"{budget - total_used:,.0f}. Combined priority "
+                        f"{sum(vals[j] for j, *_ in selected):.0f} pts.")
+                    st.dataframe(pd.DataFrame(s_rows), width="stretch",
+                                 hide_index=True)
+                    if deferred:
+                        st.markdown("#### Deferred / not funded")
+                        st.dataframe(pd.DataFrame([{
+                            "Project": b.project_input.project_name,
+                            "Investment": fmt_ccy(b.metrics.total_investment,
+                                                  b.project_input.reporting_currency),
+                            "Priority": vals[j],
+                        } for j, b in deferred]), width="stretch", hide_index=True)
+                    # ─ sensitivity: budget −10% ─
+                    tight = budget * 0.9
+                    tight_rem = tight - forced_cost
+                    tight_picked: set[int] = set()
+                    if tight_rem > 0 and nf_indices:
+                        res_t = knapsack_select([costs[i] for i in nf_indices],
+                                                [vals[i] for i in nf_indices],
+                                                tight_rem)
+                        tight_picked = {nf_indices[pos]
+                                        for pos in res_t["selected"]}
+                    kept_t = {j for j, b in enumerate(cands)
+                              if b.project_input.project_name in forced_names} | tight_picked
+                    dropped = [(j, b) for j, b in enumerate(cands)
+                               if j not in kept_t]
+                    with st.expander(f"📉 Sensitivity: budget cut 10% "
+                                     f"({tight:,.0f})"):
+                        if dropped:
+                            st.markdown("**These projects fall out of the "
+                                        "funded set under a 10% cut:**")
+                            for j, b in dropped:
+                                st.markdown(f"• **{b.project_input.project_name}**"
+                                            f" — priority {vals[j]:.0f}, "
+                                            f"investment {fmt_ccy(b.metrics.total_investment, b.project_input.reporting_currency)}")
+                        else:
+                            st.markdown("The funded set is unchanged under a "
+                                        "10% budget cut (there was spare "
+                                        "capacity).")
+                    with st.expander("Conditions attached to selected projects"):
+                        for j, b, basis in selected:
+                            f = funding_priority(b, vision_score=vision_b)
+                            st.markdown(f"**{f['project_name']}** "
+                                        f"({f['grade']}, {f['score']})")
+                            for flag in f["flags"]:
+                                st.markdown(f"• {flag}")
 
-For Gmail, use an App Password. On Streamlit Cloud use **Settings, Secrets** with the same
-`[smtp]` keys, or the `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_FROM`
-environment variables. Restart the app once configured.
-"""
-        )
+    # ── A/B what-if ────────────────────────────────────────────────────────
+    with tab_ab:
+        st.markdown(
+            "Run one project under a what-if variant and compare base vs "
+            "variant side-by-side (overruns, demand shock, delay, FX…).")
+        if not bundles:
+            st.info("No projects available for what-if analysis.")
+        else:
+            base_name = st.selectbox("Baseline project",
+                                     [b.project_input.project_name for b in bundles],
+                                     key="cmp_ab_base")
+            base = next(b for b in bundles
+                        if b.project_input.project_name == base_name)
+            preset = st.selectbox("What-if variant", VARIANT_LABELS,
+                                  key="cmp_ab_preset")
+            if st.button("🅰️🅱️ Run A/B what-if", key="cmp_ab_run"):
+                p2, note = _variant_project(base.project_input, preset)
+                v_bundle = run_analysis(p2)
+                st.info(note)
+                m = base.metrics
+                vm = v_bundle.metrics
+                delta = lambda a, b: (b - a)
+                ab_rows = [
+                    ("NPV",        fmt_ccy(m.npv, base.project_input.reporting_currency),
+                     fmt_ccy(vm.npv, p2.reporting_currency)),
+                    ("IRR",        fmt_pct(m.irr), fmt_pct(vm.irr)),
+                    ("MIRR",       fmt_pct(m.mirr), fmt_pct(vm.mirr)),
+                    ("Payback (y)", f"{m.payback:.1f}" if m.payback else "n/a",
+                     f"{vm.payback:.1f}" if vm.payback else "n/a"),
+                    ("PI",         f"{m.pi:.2f}" if m.pi else "n/a",
+                     f"{vm.pi:.2f}" if vm.pi else "n/a"),
+                    ("EAA",        fmt_ccy(m.eaa, base.project_input.reporting_currency),
+                     fmt_ccy(vm.eaa, p2.reporting_currency)),
+                    ("Decision",   f"{base.decision.status} "
+                                   f"{base.decision.score:.0f}/100",
+                     f"{v_bundle.decision.status} {v_bundle.decision.score:.0f}/100"),
+                    ("Risk",       f"{base.risk.level} {base.risk.score:.0f}",
+                     f"{v_bundle.risk.level} {v_bundle.risk.score:.0f}"),
+                    ("FX risk",    f"{base.fx['fx_risk_level']} "
+                                   f"{base.fx['fx_risk_score']:.0f}",
+                     f"{v_bundle.fx['fx_risk_level']} "
+                                   f"{v_bundle.fx['fx_risk_score']:.0f}"),
+                ]
+                dfab = pd.DataFrame(ab_rows, columns=["Metric", "Baseline", "Variant"])
+                st.dataframe(dfab, width="stretch", hide_index=True)
+                st.markdown("#### Decision banners")
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.markdown("**Baseline**")
+                    metric_card(base.decision.status,
+                                f"{base.decision.score:.0f}/100",
+                                base.decision.grade)
+                with c2:
+                    st.markdown("**Variant — " + p2.project_name.split("  [")[0]
+                                + "**")
+                    metric_card(v_bundle.decision.status,
+                                f"{v_bundle.decision.score:.0f}/100",
+                                v_bundle.decision.grade)
+                if st.button("➕ Add variant to portfolio", key="cmp_ab_add"):
+                    st.session_state.portfolio.append(v_bundle)
+                    st.success("Variant added to Portfolio page.")
 
 
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════════════
+# ASK CAPEXX AI PAGE
+# ═══════════════════════════════════════════════════════════════════════════════
+def ask_ai_page():
+    st.subheader("🤖 ASK CAPEXX AI — Global Investment Research")
+    st.markdown(
+        "Ask any capital-budgeting, risk, currency, macro, country, "
+        "company or financial-market question. CAPEXX grounds every answer "
+        "in verifiable sources and never fabricates data.")
 
+    with st.expander("💡 Try these example questions"):
+        for ex in EXAMPLE_QUESTIONS:
+            if st.button(ex, key=f"ex_{ex[:25]}"):
+                st.session_state["_ask_q"] = ex
+
+    with st.expander("🔎 Search modes", expanded=False):
+        for mode in SEARCH_MODES:
+            st.markdown(f"• {mode}")
+
+    q = st.text_input("Your question", value=st.session_state.get("_ask_q", ""),
+                       key="ask_input",
+                       placeholder="e.g. Analyse the investment climate in Zimbabwe")
+    mode = st.selectbox("Mode", SEARCH_MODES, index=0)
+
+    if q and st.button("ASK CAPEXX AI", type="primary"):
+        ctx = {}
+        if st.session_state.bundle:
+            ctx["project_results"] = st.session_state.bundle
+        with st.spinner("Researching…"):
+            result = research(q, mode=mode.lower().split()[0], context=ctx if ctx else None)
+        st.session_state.ask_history.append(result)
+        st.markdown(result["markdown"])
+        if result.get("status_line"):
+            st.caption(result["status_line"])
+        st.caption(f"Status: {result['status']}")
+        if result.get("references"):
+            with st.expander("References"):
+                for r in result["references"]:
+                    st.markdown(f"• {r}")
+        if st.button("🔊 Read answer aloud", key="ask_tts"):
+            res = read_aloud(result["spoken"])
+            if res["ok"]:
+                st.audio(res["path"])
+            else:
+                st.info(f"⚠️ VOICE UNAVAILABLE — {res['error']}")
+
+    if st.session_state.ask_history:
+        st.markdown("---")
+        st.markdown("#### Session history")
+        for i, h in enumerate(reversed(st.session_state.ask_history[-10:])):
+            with st.expander(f"Q: {h['question'][:70]}…  [{h['status']}]"):
+                st.markdown(h["markdown"])
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# REPORTS & DELIVERY PAGE
+# ═══════════════════════════════════════════════════════════════════════════════
+def reports_page():
+    st.subheader("📤 Reports & Delivery")
+    bundle = st.session_state.bundle
+    if not bundle:
+        st.info("Run a project analysis first.")
+        return
+
+    from capexx_engine import build_report_markdown, build_email, try_send_email
+
+    md_report = build_report_markdown(bundle)
+    st.download_button("📥 Download Full Report (Markdown)",
+                        data=md_report,
+                        file_name=f"{bundle.project_input.project_name.replace(' ','_')}_CAPEXX_Report.md",
+                        mime="text/markdown")
+
+    email = build_email(bundle)
+    st.markdown("**Email preview:**")
+    st.markdown(f"**Subject:** {email['subject']}")
+    st.text_area("Body", email["body"], height=260)
+
+    recipient = st.text_input("Recipient email", value="decision-maker@example.com")
+    smtp_host = st.text_input("SMTP host", value="smtp.gmail.com")
+    smtp_port = st.text_input("SMTP port", value="587")
+    smtp_user = st.text_input("SMTP user", value="")
+    smtp_pass = st.text_input("SMTP password", type="password", value="")
+
+    if st.button("📧 SEND EMAIL", type="primary"):
+        cfg = {"smtp_host": smtp_host, "smtp_port": smtp_port,
+               "smtp_user": smtp_user, "smtp_password": smtp_pass,
+               "smtp_from": smtp_user}
+        res = try_send_email(email["subject"], email["body"], recipient, config=cfg)
+        if res["confirmed"]:
+            st.success(res["message"])
+        else:
+            st.warning(res["message"])
+
+    st.markdown("---")
+    st.markdown("#### Audio narration")
+    narr = build_narration_text(bundle)
+    au_path = str(OUTPUT_AU / f"{bundle.project_input.project_name.replace(' ','_')}_narration.mp3")
+    if st.button("🎙️ Generate narration audio"):
+        res = synthesize(narr, out_path=au_path)
+        if res["ok"]:
+            st.audio(res["path"])
+            with open(res["path"], "rb") as f:
+                st.download_button("📥 Download audio", data=f.read(),
+                                    file_name=os.path.basename(res["path"]),
+                                    mime="audio/mpeg")
+        else:
+            st.warning(f"⚠️ {res['error']}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ABOUT PAGE
+# ═══════════════════════════════════════════════════════════════════════════════
+def about_page():
+    st.subheader("ℹ️ About CAPEXX AI AGENT")
+    robot_img = ASSETS / "robot.png"
+    if robot_img.exists():
+        st.image(str(robot_img), width=120)
+    st.markdown("""
+**CAPEXX AI AGENT** is an AI-powered capital-project decision intelligence platform.
+
+### How it works
+CAPEXX takes your project proposal and runs it through **one central cash-flow
+engine** that produces a full capital-budgeting analysis, risk profile, currency
+(FX) analysis, scenario comparison, stress tests, and a transparent
+rule-based decision — all from a single source of truth.
+
+### Who it is for
+Any organisation making long-term capital investment decisions —
+infrastructure, hospitals, universities, innovation hubs, energy, mining,
+technology, manufacturing, agriculture, transport, real estate, tourism,
+telecommunications.
+
+### Transparency
+- Every decision rule is shown explicitly (financial, risk, scenario pillars).
+- All figures trace to Input → Calculation → Evidence → Interpretation.
+- External data points carry Source | Date | Status labels.
+- Market-simulation prices are labelled **DEMONSTRATION ONLY**.
+- This is a decision-support system; it does not replace professional advice.
+
+### Data sources
+- Exchange rates: public keyless API (open.er-api.com) at run time.
+- Country statistics: World Bank Open Data API.
+- News: Google News RSS.
+- Knowledge base: standard published finance textbooks and references.
+""", unsafe_allow_html=False)
+
+    st.markdown("### Documentation")
+    docs_dir = ROOT / "docs"
+    for md_file in sorted(docs_dir.glob("*.md")):
+        if st.button(f"📄 {md_file.stem.replace('_',' ').title()}", key=f"doc_{md_file.name}"):
+            st.markdown(md_file.read_text(encoding="utf-8"))
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MAIN
+# ═══════════════════════════════════════════════════════════════════════════════
 def main():
-    inject_theme()
-    section = render_sidebar()
-    _maybe_auto_fetch_fx()
-    if "refresh" in st.session_state.get("fx_requested", ""):
-        _run_live_fetch()
-        st.session_state.pop("fx_requested", None)
-    if section == "Executive Dashboard":
-        render_executive_dashboard()
-    elif section == "Investment Cases":
-        render_investment_cases()
-    elif section == "Capital Budgeting":
-        render_capital_budgeting()
-    elif section == "DCF & Valuation":
-        render_dcf_valuation()
-    elif section == "Returns":
-        render_returns()
-    elif section == "Risk Analysis":
-        render_risk_analysis()
-    elif section == "FX & Multi-Currency":
-        render_fx_multicurrency()
-    elif section == "Scenario Analysis":
-        render_scenario_analysis()
-    elif section == "Sensitivity Analysis":
-        render_sensitivity_analysis()
-    elif section == "Project Comparison":
-        render_project_comparison()
-    elif section == "AI Decision":
-        render_ai_decision()
-    elif section == "Reports":
-        render_reports()
-    else:
-        render_settings()
+    inject_css()
+    if not st.session_state.logged_in:
+        login_page()
+        return
+
+    page = sidebar()
+    if   page == PAGES[0]: home_page()
+    elif page == PAGES[1]: project_analysis_page()
+    elif page == PAGES[2]: portfolio_page()
+    elif page == PAGES[3]: compare_page()
+    elif page == PAGES[4]: fx_board_page()
+    elif page == PAGES[5]: ask_ai_page()
+    elif page == PAGES[6]: reports_page()
+    elif page == PAGES[7]: about_page()
 
 
 if __name__ == "__main__":
