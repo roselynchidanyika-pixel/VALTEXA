@@ -1,0 +1,6 @@
+project,organisation,country,type,reporting_currency,initial_capex,annual_revenue,project_life,tax_rate,discount_rate
+GZU Mashava Innovation Hub,Great Zimbabwe University,Zimbabwe,University / Education,USD,17000000,8500000,15,25,12
+Gaborone Solar Park,BPC Energy,Botswana,Energy / Power,BWP,120000000,42000000,25,22,10
+Kampala Precision Factory,Uganda Manufacturing Co,Uganda,Manufacturing Plant,UGX,45000000000,21000000000,12,30,14
+Windhoek Regional Hospital,Ministry of Health,Namibia,Hospital / Healthcare,NAD,950000000,320000000,30,0,8
+Frankfurt Edge Data Centre,RheinTech Digital,Germany,Technology / Data Centre,EUR,85000000,24000000,15,30,8

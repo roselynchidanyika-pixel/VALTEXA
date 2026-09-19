@@ -8,7 +8,7 @@ Royal-blue and white login · Cinematic intro · Market simulation ticker
 """
 from __future__ import annotations
 
-import base64, copy, io, math, os, time
+import copy, io, math, os, time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -159,6 +159,7 @@ def _init():
         "bundle": None, "portfolio": [],
         "compare_analyses": {},   # name -> AnalysisBundle (Compare & Select)
         "ask_history": [],
+        "_welcomed": False, "_welcome_audio": None, "_welcome_error": "",
         "fx_user_rates": dict(ProjectInput().fx_rates),
         "fx_live_info": None,
     }.items():
@@ -203,6 +204,9 @@ Anyone may register as Guest.
                 st.session_state.logged_in = True
                 st.session_state.username  = user
                 st.session_state.role      = res.get("role", "GUEST")
+                st.session_state["_welcomed"] = False   # robot re-welcomes
+                st.session_state["_welcome_audio"] = None
+                st.session_state["_welcome_error"] = ""
                 st.rerun()
             else:
                 st.error(res["message"])
@@ -239,37 +243,25 @@ def sidebar():
 # ═══════════════════════════════════════════════════════════════════════════════
 # HOME — Cinematic + Market simulation ticker + Robot
 # ═══════════════════════════════════════════════════════════════════════════════
-def _img_b64(path: Path) -> str:
-    if not path.exists():
-        return ""
-    return base64.b64encode(path.read_bytes()).decode()
-
 def cinematic_strip():
     imgs = [
-        (ASSETS / "rbz.jpg",        "Reserve Bank of Zimbabwe, Harare",
+        (ASSETS / "rbz.jpg",        "Reserve Bank of Zimbabwe, Harare — "
          "Markets move. Rates change. Capital projects carry real uncertainty."),
         (ASSETS / "gzu_innovation_hub.jpg",
-         "GZU Innovation Hub · Great Zimbabwe University",
-         "HYPOTHETICAL DEMONSTRATION — not actual GZU financial data."),
-        (ASSETS / "global_finance.jpg", "Global Finance",
-         "CAPEXX evaluates projects for any institution, anywhere in the world."),
-        (ASSETS / "engineers.jpg",  "Engineering & Delivery",
-         "Construction cost, delay, currency and risk — all in one engine."),
+         "GZU Innovation Hub · Great Zimbabwe University — "
+         "HYPOTHETICAL DEMONSTRATION, not actual GZU financial data."),
+        (ASSETS / "global_finance.jpg",
+         "Global Finance — CAPEXX evaluates projects for any institution, "
+         "anywhere in the world."),
+        (ASSETS / "engineers.jpg",
+         "Engineering & Delivery — Construction cost, delay, currency and "
+         "risk, all in one engine."),
     ]
-    for img, caption, note in imgs:
-        b64 = _img_b64(img)
-        if b64:
-            st.markdown(
-                f'<div style="margin:.6rem 0;border-radius:10px;overflow:hidden;'
-                f'position:relative;">'
-                f'<img src="data:image/jpeg;base64,{b64}" '
-                f'style="width:100%;height:220px;object-fit:cover;">'
-                f'<div style="position:absolute;bottom:0;left:0;width:100%;'
-                f'background:linear-gradient(transparent,rgba(0,0,0,.78));'
-                f'padding:1rem;">'
-                f'<span style="color:#fff;font-weight:700;">{caption}</span>'
-                f'<br><small style="color:#93C5FD;">{note}</small></div></div>',
-                unsafe_allow_html=True)
+    for img, caption in imgs:
+        if img.exists():
+            st.image(str(img), width="stretch", caption=caption)
+        else:
+            st.caption(f"Image not found: {img.name}")
 
 
 def market_ticker():
@@ -297,7 +289,8 @@ def market_ticker():
             unsafe_allow_html=True)
 
 
-def robot_panel(bundle: AnalysisBundle | None = None):
+def robot_panel(bundle: AnalysisBundle | None = None,
+                auto_welcome: bool = False):
     st.markdown("---")
     st.markdown('<div class="robot-box"><h4>🤖 CAPEXX AI Agent — Voice Panel</h4>',
                 unsafe_allow_html=True)
@@ -307,12 +300,35 @@ def robot_panel(bundle: AnalysisBundle | None = None):
     if bundle is None:
         st.markdown(f"<p>{ROBOT_WELCOME}</p>", unsafe_allow_html=True)
         st.markdown(f"<p><em>{ROBOT_MARKET}</em></p>", unsafe_allow_html=True)
-        if st.button("🔊 READ WELCOME ALOUD", key="robot_welcome"):
-            res = read_aloud(ROBOT_WELCOME + "\n" + ROBOT_MARKET)
+        if auto_welcome and not st.session_state["_welcomed"]:
+            res = synthesize(ROBOT_WELCOME + "\n" + ROBOT_MARKET,
+                             out_path=str(OUTPUT_AU / "capexx_welcome.mp3"))
             if res["ok"]:
-                st.audio(res["path"])
+                st.session_state["_welcome_audio"] = res["path"]
             else:
-                st.info(f"⚠️ VOICE SERVICE UNAVAILABLE — {res['error']}")
+                st.session_state["_welcome_error"] = res["error"]
+            st.session_state["_welcomed"] = True   # speak once, after login
+        au = st.session_state.get("_welcome_audio")
+        if au:
+            st.markdown("👋 **Welcome announcement** "
+                        f"<small>(for {st.session_state.username})"
+                        "</small>",
+                        unsafe_allow_html=True)
+            st.audio(au, autoplay=auto_welcome)
+            if st.button("🔊 REPLAY WELCOME", key="robot_welcome"):
+                res = read_aloud(ROBOT_WELCOME + "\n" + ROBOT_MARKET)
+                if res["ok"]:
+                    st.audio(res["path"])
+        else:
+            if st.button("🔊 READ WELCOME ALOUD", key="robot_welcome"):
+                res = read_aloud(ROBOT_WELCOME + "\n" + ROBOT_MARKET)
+                if res["ok"]:
+                    st.audio(res["path"])
+                else:
+                    st.info(f"⚠️ VOICE SERVICE UNAVAILABLE — {res['error']}")
+            elif st.session_state.get("_welcome_error"):
+                st.info("🔇 Voice service unavailable right now — tap the "
+                        "button above to retry the welcome audio.")
     else:
         narr = build_narration_text(bundle)
         secs = section_map(bundle)
@@ -340,7 +356,7 @@ def robot_panel(bundle: AnalysisBundle | None = None):
 def home_page():
     cinematic_strip()
     market_ticker()
-    robot_panel(st.session_state.bundle)
+    robot_panel(st.session_state.bundle, auto_welcome=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
